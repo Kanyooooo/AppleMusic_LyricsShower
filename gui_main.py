@@ -5,6 +5,7 @@ Apple Music 桌面歌词显示器 - GUI 版本
 
 import sys
 import os
+import json  # 引入 json 模块
 from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QLabel, QSystemTrayIcon, QMenu,
@@ -27,63 +28,44 @@ from ctypes import wintypes
 from backend_engine import BackendEngine, LyricLine
 
 class SettingsManager:
-    """简单的配置管理器，负责保存和加载用户偏好"""
+    """带 JSON 持久化的配置管理器"""
     def __init__(self):
-        # 默认配置
+        # 配置文件存放在脚本同目录
+        self.config_file = Path(__file__).parent / "config.json"
+        
+        # 默认配置（时间校准默认改为 +1.0 秒）
         self.settings = {
             'text_color': '#FFFFFF',
             'text_opacity': 1.0,
             'border_opacity': 0.0,
-            'window_width': 800,
-            'lyric_offset': 0.5
+            'window_width': 1080,
+            'lyric_offset': 1.0, 
+            'fade_enabled': True
         }
-    
-    # 以后你可以在这里加上 json.dump 来实现真正的文件保存
+        self.load()
+
+    def load(self):
+        """启动时读取本地配置"""
+        if self.config_file.exists():
+            try:
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    saved_settings = json.load(f)
+                    self.settings.update(saved_settings)
+            except Exception as e:
+                print(f"读取配置失败: {e}")
+
+    def save(self, key, value):
+        """当用户在界面修改设置时，立即保存到文件"""
+        self.settings[key] = value
+        try:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.settings, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"保存配置失败: {e}")
 
 
 class DesktopLyricWindow(QMainWindow):
     """桌面歌词悬浮窗"""
-
-    # def __init__(self):
-    #     super().__init__()
-    #     self.is_locked = False
-    #     self.dragging = False
-    #     self.drag_position = QPoint()
-    #     self.text_color = QColor(255, 255, 255)
-    #     self.text_opacity = 1.0
-    #     self.border_opacity = 0.0
-    #     self.fade_enabled = True
-
-    #     self.setWindowFlags(
-    #         Qt.WindowType.FramelessWindowHint |
-    #         Qt.WindowType.WindowStaysOnTopHint |
-    #         Qt.WindowType.Tool
-    #     )
-    #     self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-
-    #     self.lyric_label = QLabel("等待播放...")
-    #     self.lyric_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    #     self.lyric_label.setWordWrap(True)
-
-    #     self.text_opacity_effect = QGraphicsOpacityEffect(self.lyric_label)
-    #     self.text_opacity_effect.setOpacity(self.text_opacity)
-    #     self.lyric_label.setGraphicsEffect(self.text_opacity_effect)
-
-    #     self.fade_animation = QPropertyAnimation(self.text_opacity_effect, b"opacity", self)
-    #     self.fade_animation.setDuration(500)
-    #     self.fade_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
-
-    #     self.update_font_style()
-    #     self.setCentralWidget(self.lyric_label)
-
-    #     self.resize(800, 120)
-    #     self.center_on_screen()
-
-    #     self.window_opacity = 1.0
-
-    #     # 【新增：固定动画信号绑定】
-    #     self.next_lyric_text = ""
-    #     self.fade_animation.finished.connect(self._on_fade_out_finished)
 
     def __init__(self, settings_manager):
         super().__init__()
@@ -93,21 +75,22 @@ class DesktopLyricWindow(QMainWindow):
         self.dragging = False
         self.drag_position = QPoint()
         
-        # 初始样式设置，预留一个像素作为缓冲区
+        # 初始样式设置，从配置文件读取
         self.text_color = QColor(settings_manager.settings['text_color'])
         self.text_opacity = settings_manager.settings['text_opacity']
         self.border_opacity = settings_manager.settings['border_opacity']
-        self.fade_enabled = True 
+        self.fade_enabled = settings_manager.settings['fade_enabled']
         
         self.setStyleSheet("background: transparent; border: none; margin: 0px; padding: 0px;")
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
         self.setContentsMargins(0, 0, 0, 0) # 封死所有内边距
 
-        
         # 歌词标签：彻底放弃 CSS 背景和边框
         self.lyric_label = QLabel(self)
         self.lyric_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lyric_label.setWordWrap(True)
+        # 让标签无视鼠标事件，直接穿透到窗口背景触发移动
+        self.lyric_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         # 保持 padding 供内部撑开
         self.lyric_label.setStyleSheet("QLabel { background: transparent; border: 0px; padding: 20px; outline: none; }")
 
@@ -141,7 +124,6 @@ class DesktopLyricWindow(QMainWindow):
         # 刷新字体样式
         self.update_font_style()
     
-
     def update_font_style(self, color: QColor = None):
         """更新字体样式"""
         if color is not None:
@@ -152,7 +134,6 @@ class DesktopLyricWindow(QMainWindow):
         font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
         self.lyric_label.setFont(font)
         
-        # 【核心视觉修复】：在 QLabel 上只设置文字颜色，彻底移除 border-radius 这一毒瘤
         self.lyric_label.setStyleSheet(f"""
             QLabel {{
                 color: rgb({self.text_color.red()}, {self.text_color.green()}, {self.text_color.blue()});
@@ -167,76 +148,15 @@ class DesktopLyricWindow(QMainWindow):
 
     def _on_fade_out_finished(self):
         """淡出完成后的回调"""
-        # 强制更新文字
         if self.fade_animation.endValue() == 0.0:
             self.lyric_label.setText(self.next_lyric_text)
             
-            # 【核心交互修复】：确保只有在有新歌词且非切歌状态下才淡入，
-            # 并自动将动画时长从原来的不可描述改为动态自适应
             if self.next_lyric_text != "":
                 duration = 250 if len(self.next_lyric_text) > 15 else 350
                 self.fade_animation.setDuration(duration)
                 self.fade_animation.setStartValue(0.0)
                 self.fade_animation.setEndValue(self.text_opacity)
                 self.fade_animation.start()
-
-    # def _on_fade_out_finished(self):
-    #     """淡出完成后的回调（状态机控制）"""
-    #     # 只有在完全淡出（opacity为0）时才切换文字并淡入
-    #     if self.fade_animation.endValue() == 0.0:
-    #         if self.next_lyric_text == "":
-    #             # 间奏期间，保持空白
-    #             self.lyric_label.setText("")
-    #         else:
-    #             # 切换到新歌词并淡入
-    #             self.lyric_label.setText(self.next_lyric_text)
-    #             self.fade_animation.setDuration(250)
-    #             self.fade_animation.setStartValue(0.0)
-    #             self.fade_animation.setEndValue(self.text_opacity)
-    #             self.fade_animation.start()
-            
-    # def _on_fade_out_finished(self):
-    #     """淡出完成后的回调"""
-    #     if self.fade_animation.endValue() == 0.0:
-    #         if self.next_lyric_text == "":
-    #             self.lyric_label.setText("")
-    #         else:
-    #             self.lyric_label.setText(self.next_lyric_text)
-                
-    #             # 【动态时长同步】：淡入时长与淡出时长保持一致
-    #             is_long_text = len(self.next_lyric_text) > 15
-    #             duration = 150 if is_long_text else 250
-                
-    #             self.fade_animation.setDuration(duration)
-    #             self.fade_animation.setStartValue(0.0)
-    #             self.fade_animation.setEndValue(self.text_opacity)
-    #             self.fade_animation.start()
-
-
-    # def update_font_style(self, color: QColor = None):
-    #     """更新字体样式"""
-    #     if color is not None:
-    #         self.text_color = color
-
-    #     font = QFont("Microsoft YaHei", 32, QFont.Weight.Bold)
-    #     self.lyric_label.setFont(font)
-
-    #     # 【核心视觉修复】：当透明度为0时，取消圆角以防止边缘抗锯齿残影
-    #     radius = "12px" if self.border_opacity > 0 else "0px"
-
-    #     style = f"""
-    #         QLabel {{
-    #             color: rgb({self.text_color.red()}, {self.text_color.green()}, {self.text_color.blue()});
-    #             background-color: rgba(0, 0, 0, {int(self.border_opacity * 255)});
-    #             border: 0px solid transparent; /* 强制零像素透明边框 */
-    #             outline: none;
-    #             border-radius: {radius};
-    #             padding: 20px;
-    #         }}
-    #     """
-
-    #     self.lyric_label.setStyleSheet(style)
-    #     self.text_opacity_effect.setOpacity(self.text_opacity)
 
     def set_window_opacity_value(self, opacity: float):
         """设置窗口整体透明度"""
@@ -269,38 +189,13 @@ class DesktopLyricWindow(QMainWindow):
         y = screen.height() - self.height() - 100
         self.move(x, y)
 
-    # def update_lyric(self, text: str):
-    #     """更新歌词文本，支持呼吸动效"""
-    #     if text == "":
-    #         # 间奏期间，淡出歌词
-    #         if self.fade_enabled:
-    #             self.next_lyric_text = ""
-    #             self.fade_animation.stop()
-    #             self.fade_animation.setDuration(150)
-    #             self.fade_animation.setStartValue(self.text_opacity_effect.opacity())
-    #             self.fade_animation.setEndValue(0.0)
-    #             self.fade_animation.start()
-    #         else:
-    #             self.lyric_label.setText("")
-    #     else:
-    #         # 有歌词，执行切换动效
-    #         if self.fade_enabled:
-    #             self.next_lyric_text = text
-    #             self.fade_animation.stop()
-    #             self.fade_animation.setDuration(150)
-    #             self.fade_animation.setStartValue(self.text_opacity_effect.opacity())
-    #             self.fade_animation.setEndValue(0.0)
-    #             self.fade_animation.start()
-    #         else:
-    #             self.lyric_label.setText(text)
-
     def update_lyric(self, text: str):
         """更新歌词文本，支持动态时长呼吸动效"""
         if text == "":
             if self.fade_enabled:
                 self.next_lyric_text = ""
                 self.fade_animation.stop()
-                self.fade_animation.setDuration(250) # 统一为 0.25s 淡出
+                self.fade_animation.setDuration(250) 
                 self.fade_animation.setStartValue(self.text_opacity_effect.opacity())
                 self.fade_animation.setEndValue(0.0)
                 self.fade_animation.start()
@@ -310,9 +205,6 @@ class DesktopLyricWindow(QMainWindow):
             if self.fade_enabled:
                 self.next_lyric_text = text
                 
-                # 【动态时长计算】：
-                # 如果歌词字数超过 15 个字，或者两句歌词间隔很短，
-                # 自动将总切换时长从 500ms 压缩到 300ms 以保证节奏。
                 is_long_text = len(text) > 15
                 duration = 150 if is_long_text else 250
                 
@@ -329,7 +221,6 @@ class DesktopLyricWindow(QMainWindow):
         self.is_locked = locked
 
         if locked:
-            # 启用鼠标穿透
             hwnd = int(self.winId())
             GWL_EXSTYLE = -20
             WS_EX_TRANSPARENT = 0x00000020
@@ -339,7 +230,6 @@ class DesktopLyricWindow(QMainWindow):
             style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
             user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_TRANSPARENT | WS_EX_LAYERED)
         else:
-            # 禁用鼠标穿透
             hwnd = int(self.winId())
             GWL_EXSTYLE = -20
             WS_EX_TRANSPARENT = 0x00000020
@@ -366,6 +256,7 @@ class DesktopLyricWindow(QMainWindow):
         if event.button() == Qt.MouseButton.LeftButton:
             self.dragging = False
             event.accept()
+
 
 class SettingsDialog(QDialog):
     """设置对话框"""
@@ -400,7 +291,6 @@ class SettingsDialog(QDialog):
         self.border_opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.border_opacity_slider.setMinimum(0)
         self.border_opacity_slider.setMaximum(100)
-        self.border_opacity_slider.setValue(0)
         self.border_opacity_slider.valueChanged.connect(self.on_border_opacity_changed)
         self.border_opacity_value_label = QLabel("0%")
         border_opacity_layout.addWidget(border_opacity_label)
@@ -412,7 +302,6 @@ class SettingsDialog(QDialog):
         self.text_opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.text_opacity_slider.setMinimum(10)
         self.text_opacity_slider.setMaximum(100)
-        self.text_opacity_slider.setValue(100)
         self.text_opacity_slider.valueChanged.connect(self.on_text_opacity_changed)
         self.text_opacity_value_label = QLabel("100%")
         text_opacity_layout.addWidget(text_opacity_label)
@@ -424,9 +313,8 @@ class SettingsDialog(QDialog):
         self.window_width_slider = QSlider(Qt.Orientation.Horizontal)
         self.window_width_slider.setMinimum(400)
         self.window_width_slider.setMaximum(1600)
-        self.window_width_slider.setValue(800)
         self.window_width_slider.valueChanged.connect(self.on_window_width_changed)
-        self.window_width_value_label = QLabel("800 px")
+        self.window_width_value_label = QLabel("1080 px")
         window_width_layout.addWidget(window_width_label)
         window_width_layout.addWidget(self.window_width_slider)
         window_width_layout.addWidget(self.window_width_value_label)
@@ -438,9 +326,8 @@ class SettingsDialog(QDialog):
         self.offset_slider = QSlider(Qt.Orientation.Horizontal)
         self.offset_slider.setMinimum(-20)
         self.offset_slider.setMaximum(20)
-        self.offset_slider.setValue(5)
         self.offset_slider.valueChanged.connect(self.on_offset_changed)
-        self.offset_value_label = QLabel("+0.5 秒")
+        self.offset_value_label = QLabel("+1.0 秒")
         offset_layout.addWidget(offset_label)
         offset_layout.addWidget(offset_hint)
         offset_layout.addWidget(self.offset_slider)
@@ -461,7 +348,6 @@ class SettingsDialog(QDialog):
         func_tab = QWidget()
         func_layout = QVBoxLayout()
         self.fade_checkbox = QCheckBox("启用歌词渐入渐出（使用 0.5 秒做切换）")
-        self.fade_checkbox.setChecked(True)
         self.fade_checkbox.setFont(QFont("Microsoft YaHei", 12))
         self.fade_checkbox.toggled.connect(self.fade_enabled_changed.emit)
         func_layout.addStretch()
@@ -519,7 +405,6 @@ class SupportDialog(QDialog):
 
         layout = QVBoxLayout()
 
-        # 开发者信息
         info_label = QLabel("开发者邮箱：1531516107@qq.com")
         info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         info_label.setFont(QFont("Microsoft YaHei", 12))
@@ -527,11 +412,9 @@ class SupportDialog(QDialog):
 
         layout.addSpacing(20)
 
-        # 打赏码图片
         dashang_path = Path(__file__).parent / "dashang.png"
         if dashang_path.exists():
             pixmap = QPixmap(str(dashang_path))
-            # 等比例缩放
             pixmap = pixmap.scaled(300, 300, Qt.AspectRatioMode.KeepAspectRatio,
                                    Qt.TransformationMode.SmoothTransformation)
 
@@ -561,8 +444,11 @@ class MainApplication(QApplication):
         self.create_tray_icon()
 
         self.backend_thread = BackendEngine()
-        self.backend_thread.set_lyric_offset(0.5)
-        self.backend_thread.set_fade_enabled(True)
+        
+        # 启动时读取持久化配置给后端引擎
+        self.backend_thread.set_lyric_offset(self.settings_manager.settings['lyric_offset'])
+        self.backend_thread.set_fade_enabled(self.settings_manager.settings['fade_enabled'])
+        
         self.backend_thread.lyric_updated.connect(self.on_lyric_updated)
         self.backend_thread.song_changed.connect(self.on_song_changed)
         self.backend_thread.status_changed.connect(self.on_status_changed)
@@ -573,28 +459,21 @@ class MainApplication(QApplication):
 
     def create_tray_icon(self):
         """创建系统托盘图标"""
-
-        # 尝试加载图标
         icon_path = Path(__file__).parent / "logo.png"
         if icon_path.exists():
             icon = QIcon(str(icon_path))
         else:
-            # 使用系统默认图标
             icon = self.style().standardIcon(self.style().StandardPixmap.SP_MediaPlay)
 
         self.tray_icon = QSystemTrayIcon(icon, self)
-
-        # 创建托盘菜单
         tray_menu = QMenu()
 
-        # 显示/隐藏歌词
         self.show_action = QAction("显示歌词", self)
         self.show_action.setCheckable(True)
         self.show_action.setChecked(True)
         self.show_action.triggered.connect(self.toggle_lyric_window)
         tray_menu.addAction(self.show_action)
 
-        # 锁定歌词
         self.lock_action = QAction("锁定歌词", self)
         self.lock_action.setCheckable(True)
         self.lock_action.setChecked(False)
@@ -603,19 +482,16 @@ class MainApplication(QApplication):
 
         tray_menu.addSeparator()
 
-        # 设置
         settings_action = QAction("设置", self)
         settings_action.triggered.connect(self.show_settings)
         tray_menu.addAction(settings_action)
 
-        # 支持/联系作者
         support_action = QAction("支持/联系作者", self)
         support_action.triggered.connect(self.show_support)
         tray_menu.addAction(support_action)
 
         tray_menu.addSeparator()
 
-        # 退出
         quit_action = QAction("退出", self)
         quit_action.triggered.connect(self.quit_application)
         tray_menu.addAction(quit_action)
@@ -624,20 +500,29 @@ class MainApplication(QApplication):
         self.tray_icon.show()
 
     def toggle_lyric_window(self, checked):
-        """切换歌词窗口显示/隐藏"""
         if checked:
             self.lyric_window.show()
         else:
             self.lyric_window.hide()
 
     def toggle_lock(self, checked):
-        """切换锁定状态"""
         self.lyric_window.set_locked(checked)
 
     def show_settings(self):
-        """显示设置对话框"""
+        """显示设置对话框并打通数据持久化"""
         if self.settings_dialog is None:
             self.settings_dialog = SettingsDialog(self.lyric_window)
+            
+            # --- 1. 读取存档，初始化设置面板的滑块和状态 ---
+            s = self.settings_manager.settings
+            self.settings_dialog.current_color = QColor(s['text_color'])
+            self.settings_dialog.border_opacity_slider.setValue(int(s['border_opacity'] * 100))
+            self.settings_dialog.text_opacity_slider.setValue(int(s['text_opacity'] * 100))
+            self.settings_dialog.offset_slider.setValue(int(s['lyric_offset'] * 10))
+            self.settings_dialog.window_width_slider.setValue(s['window_width'])
+            self.settings_dialog.fade_checkbox.setChecked(s['fade_enabled'])
+
+            # --- 2. 绑定 UI 实时生效事件 ---
             self.settings_dialog.color_changed.connect(self.lyric_window.update_font_style)
             self.settings_dialog.border_opacity_changed.connect(self.lyric_window.set_border_opacity)
             self.settings_dialog.text_opacity_changed.connect(self.lyric_window.set_text_opacity)
@@ -646,12 +531,19 @@ class MainApplication(QApplication):
             self.settings_dialog.fade_enabled_changed.connect(self.backend_thread.set_fade_enabled)
             self.settings_dialog.window_width_changed.connect(self.lyric_window.set_window_width)
 
+            # --- 3. 绑定 JSON 本地持久化保存事件 ---
+            self.settings_dialog.color_changed.connect(lambda c: self.settings_manager.save('text_color', c.name()))
+            self.settings_dialog.border_opacity_changed.connect(lambda v: self.settings_manager.save('border_opacity', v))
+            self.settings_dialog.text_opacity_changed.connect(lambda v: self.settings_manager.save('text_opacity', v))
+            self.settings_dialog.lyric_offset_changed.connect(lambda v: self.settings_manager.save('lyric_offset', v))
+            self.settings_dialog.window_width_changed.connect(lambda v: self.settings_manager.save('window_width', v))
+            self.settings_dialog.fade_enabled_changed.connect(lambda v: self.settings_manager.save('fade_enabled', v))
+
         self.settings_dialog.show()
         self.settings_dialog.raise_()
         self.settings_dialog.activateWindow()
 
     def show_support(self):
-        """显示支持对话框"""
         if self.support_dialog is None:
             self.support_dialog = SupportDialog(self.lyric_window)
 
@@ -660,40 +552,25 @@ class MainApplication(QApplication):
         self.support_dialog.activateWindow()
 
     def quit_application(self):
-        """安全退出应用"""
-        # 停止后端线程
         self.backend_thread.stop()
         self.backend_thread.wait()
-
-        # 退出应用
         self.quit()
 
     def on_lyric_updated(self, text: str):
-        """歌词更新"""
         self.lyric_window.update_lyric(text)
 
     def on_song_changed(self, title: str, artist: str):
-        # """歌曲切换"""
-        # self.tray_icon.showMessage(
-        #     "正在播放",
-        #     f"{title}\n{artist}",
-        #     QSystemTrayIcon.MessageIcon.Information,
-        #     2000
-        # )
-        pass #这个功能有点影响听感了。
+        pass 
         self.tray_icon.setToolTip(f"正在播放: {title} - {artist}")
 
     def on_status_changed(self, status: str):
-        """播放状态改变"""
         if status == "paused":
             self.lyric_window.update_lyric("[已暂停]")
         elif status == "stopped":
             self.lyric_window.update_lyric("等待播放...")
 
 
-
 def main():
-    """主函数"""
     app = MainApplication(sys.argv)
     sys.exit(app.exec())
 

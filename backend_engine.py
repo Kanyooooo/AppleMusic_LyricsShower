@@ -258,12 +258,17 @@ class BackendEngine(QThread):
     #             return False
 
     def trigger_lyrics_button(self, pid: int) -> bool:
-        """用原生 UIAutomation 极速搜索，无视层级深度"""
+        """唤醒窗口并触发歌词按钮，完成后恢复原状态"""
         if not UIAUTOMATION_AVAILABLE:
             return False
 
+        user32 = ctypes.windll.user32
+        SW_RESTORE = 9
+        SW_MINIMIZE = 6
+
         try:
             auto.SetGlobalSearchTimeout(2)
+
             # 定位主窗口
             window = auto.WindowControl(searchDepth=2, ProcessId=pid)
             if not window.Exists(0):
@@ -272,15 +277,32 @@ class BackendEngine(QThread):
             if not window.Exists(0):
                 return False
 
+            # 获取窗口句柄和原始状态
+            hwnd = window.NativeWindowHandle
+            was_minimized = user32.IsIconic(hwnd)
+
+            # 如果窗口最小化或在后台，强制唤醒
+            if was_minimized or user32.GetForegroundWindow() != hwnd:
+                user32.ShowWindow(hwnd, SW_RESTORE)
+                user32.SetForegroundWindow(hwnd)
+                import time
+                time.sleep(0.3)  # 给窗口渲染时间
+
             # WinUI 3 树极深，使用深度为 20 的原生底层搜索
             button = window.Control(searchDepth=20, RegexName='(?i).*(lyrics|歌词).*')
             if not button.Exists(0):
+                # 恢复原状态
+                if was_minimized:
+                    user32.ShowWindow(hwnd, SW_MINIMIZE)
                 return False
 
-            # 【防误触核心】：如果已经是高亮打开状态，绝对不要点，点了反而关掉加载！
+            # 【防误触核心】：如果已经是高亮打开状态，绝对不要点
             try:
                 if button.GetTogglePattern().ToggleState == 1:
-                    return True # 已经是开启状态，直接返回等网速
+                    # 恢复原状态
+                    if was_minimized:
+                        user32.ShowWindow(hwnd, SW_MINIMIZE)
+                    return True
             except Exception:
                 pass
 
@@ -288,6 +310,13 @@ class BackendEngine(QThread):
                 button.Invoke()
             except Exception:
                 button.Click(simulateMove=False)
+
+            # 恢复原状态
+            if was_minimized:
+                import time
+                time.sleep(0.2)  # 给点击事件时间
+                user32.ShowWindow(hwnd, SW_MINIMIZE)
+
             return True
         except Exception as e:
             print(f"UIAutomation 触发失败: {e}")
@@ -301,6 +330,19 @@ class BackendEngine(QThread):
             parts = time_str.split(':')
             return int(parts[0]) * 60 + float(parts[1])
         return float(time_str)
+
+    def split_ttml_blocks(self, data: bytes) -> List[bytes]:
+        """物理切割内存中的多个 TTML 块，防止歌词缝合"""
+        try:
+            text = data.decode('utf-16le', errors='ignore')
+        except Exception:
+            return []
+
+        # 非贪婪正则，提取所有完整的 <tt>...</tt> 树
+        blocks = re.findall(r'<tt[\s\S]*?</tt>', text, re.IGNORECASE)
+
+        # 转回 bytes 供后续解析
+        return [block.encode('utf-16le') for block in blocks if block.strip()]
 
     def parse_ttml_lyrics(self, data: bytes) -> Tuple[List[LyricLine], float]:
         """解析 TTML 歌词，返回 (歌词列表, TTML标定时长)"""
@@ -538,12 +580,15 @@ class BackendEngine(QThread):
                         best_match = None
                         best_score = -999
 
-                        for attempt in range(4):
-                            ttml_list = await asyncio.to_thread(self.extract_all_ttml, pid)
+                        # 第一次扫描：直接扫内存
+                        ttml_list = await asyncio.to_thread(self.extract_all_ttml, pid)
 
-                            if ttml_list:
-                                for ttml_data in ttml_list:
-                                    lyrics, ttml_dur = self.parse_ttml_lyrics(ttml_data)
+                        if ttml_list:
+                            for raw_ttml in ttml_list:
+                                # 物理切割多个 TTML 块
+                                blocks = self.split_ttml_blocks(raw_ttml)
+                                for block in blocks:
+                                    lyrics, ttml_dur = self.parse_ttml_lyrics(block)
                                     if not lyrics:
                                         continue
 
@@ -557,7 +602,7 @@ class BackendEngine(QThread):
                                             score -= 50
 
                                     try:
-                                        text = ttml_data.decode('utf-16le', errors='ignore').lower()
+                                        text = block.decode('utf-16le', errors='ignore').lower()
                                         title_chars = set(c for c in title.lower() if c.isalnum())
                                         artist_chars = set(c for c in artist.lower() if c.isalnum())
 
@@ -575,20 +620,64 @@ class BackendEngine(QThread):
                                         best_score = score
                                         best_match = lyrics
 
-                            if best_match and best_score >= 50:
-                                break
-
-                            if attempt == 0:
-                                await asyncio.to_thread(self.trigger_lyrics_button, pid)
-                            
-                            # 等待网络拉取，进入下一轮循环扫内存
-                            await asyncio.sleep(1.5)
-
-                        if best_match:
+                        # 如果第一次扫描命中，熔断退出
+                        if best_match and best_score >= 50:
                             self.current_lyrics = best_match
-                            self.last_index = -1 
+                            self.last_index = -1
                         else:
-                            self.lyric_updated.emit("未找到同步歌词")
+                            # 未命中：唤醒窗口并触发歌词按钮
+                            await asyncio.to_thread(self.trigger_lyrics_button, pid)
+
+                            # 高频短轮询：5 次 × 0.5 秒
+                            for _ in range(5):
+                                await asyncio.sleep(0.5)
+                                ttml_list = await asyncio.to_thread(self.extract_all_ttml, pid)
+
+                                if ttml_list:
+                                    for raw_ttml in ttml_list:
+                                        blocks = self.split_ttml_blocks(raw_ttml)
+                                        for block in blocks:
+                                            lyrics, ttml_dur = self.parse_ttml_lyrics(block)
+                                            if not lyrics:
+                                                continue
+
+                                            score = 0
+
+                                            if ttml_dur > 0:
+                                                duration_diff = abs(ttml_dur - duration)
+                                                if duration_diff <= 3.0:
+                                                    score += 100
+                                                else:
+                                                    score -= 50
+
+                                            try:
+                                                text = block.decode('utf-16le', errors='ignore').lower()
+                                                title_chars = set(c for c in title.lower() if c.isalnum())
+                                                artist_chars = set(c for c in artist.lower() if c.isalnum())
+
+                                                title_hits = sum(1 for c in title_chars if c in text)
+                                                artist_hits = sum(1 for c in artist_chars if c in text)
+
+                                                if title_chars:
+                                                    score += (title_hits / len(title_chars)) * 150
+                                                if artist_chars:
+                                                    score += (artist_hits / len(artist_chars)) * 150
+                                            except Exception:
+                                                pass
+
+                                            if score > best_score:
+                                                best_score = score
+                                                best_match = lyrics
+
+                                # 一旦命中，立刻熔断
+                                if best_match and best_score >= 50:
+                                    break
+
+                            if best_match:
+                                self.current_lyrics = best_match
+                                self.last_index = -1
+                            else:
+                                self.lyric_updated.emit("未找到同步歌词")
 
 
                 if self.current_lyrics:

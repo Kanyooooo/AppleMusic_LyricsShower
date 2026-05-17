@@ -15,6 +15,8 @@ public sealed record LyricsBundle(
 
     public static LyricsBundle Empty(string reason) => new(reason, Array.Empty<LyricLine>(), false, TimeSpan.Zero, string.Empty);
 
+    public LyricsBundle WithSource(string source) => this with { Source = source };
+
     public LyricLine? FindLine(TimeSpan position, TimeSpan offset)
     {
         var adjusted = position + offset;

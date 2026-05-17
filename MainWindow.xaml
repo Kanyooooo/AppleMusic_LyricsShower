@@ -3,9 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Apple Music Translator"
         Width="980"
-        Height="230"
+        Height="360"
         MinWidth="520"
-        MinHeight="150"
+        MinHeight="180"
         AllowsTransparency="True"
         Background="Transparent"
         ResizeMode="CanResizeWithGrip"
@@ -101,6 +101,31 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Grid Margin="0,0,8,0">
+                        <Button x:Name="WrongLyricsButton"
+                                Width="36"
+                                Height="30"
+                                Click="WrongLyricsButton_Click"
+                                Content="!"
+                                Style="{StaticResource ToolButtonStyle}"
+                                ToolTip="不是这首歌" />
+                        <Border x:Name="LyricsConflictBadge"
+                                Width="10"
+                                Height="10"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Top"
+                                Background="#FFFF4D6D"
+                                CornerRadius="5"
+                                Visibility="Collapsed">
+                            <TextBlock Text="!"
+                                       Foreground="#FFFFFFFF"
+                                       FontFamily="Segoe UI"
+                                       FontSize="7"
+                                       FontWeight="Bold"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+                    </Grid>
                     <Button x:Name="RefreshButton"
                             Width="36"
                             Height="30"
@@ -129,30 +154,46 @@
 
             <Grid x:Name="LyricGrid"
                   Grid.Row="1"
-                  Margin="0,18,0,12">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
+                  Margin="0,18,0,12"
+                  MouseLeftButtonDown="LyricGrid_MouseLeftButtonDown"
+                  MouseLeftButtonUp="LyricGrid_MouseLeftButtonUp"
+                  MouseMove="LyricGrid_MouseMove">
+                <Grid.RenderTransform>
+                    <TranslateTransform x:Name="LyricContentTransform" />
+                </Grid.RenderTransform>
 
-                <TextBlock x:Name="OriginalText"
-                           Foreground="#D5FFFFFF"
-                           FontFamily="Microsoft YaHei UI"
-                           FontSize="18"
-                           Text=""
-                           TextAlignment="Center"
-                           TextWrapping="Wrap" />
-                <TextBlock x:Name="MainLyricText"
-                           Grid.Row="1"
-                           Margin="0,8,0,0"
-                           Foreground="#FFFFFFFF"
-                           FontFamily="Microsoft YaHei UI"
-                           FontSize="30"
-                           FontWeight="Bold"
-                           LineHeight="38"
-                           Text="Lyrics are standing by"
-                           TextAlignment="Center"
-                           TextWrapping="Wrap" />
+                <Grid x:Name="CenterLyricsView">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock x:Name="OriginalText"
+                               Foreground="#D5FFFFFF"
+                               FontFamily="Microsoft YaHei UI"
+                               FontSize="18"
+                               Text=""
+                               TextAlignment="Center"
+                               TextWrapping="Wrap" />
+                    <TextBlock x:Name="MainLyricText"
+                               Grid.Row="1"
+                               Margin="0,8,0,0"
+                               Foreground="#FFFFFFFF"
+                               FontFamily="Microsoft YaHei UI"
+                               FontSize="30"
+                               FontWeight="Bold"
+                               LineHeight="38"
+                               Text="Lyrics are standing by"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap" />
+                </Grid>
+
+                <ScrollViewer x:Name="VerticalLyricsView"
+                              VerticalScrollBarVisibility="Hidden"
+                              HorizontalScrollBarVisibility="Disabled"
+                              Visibility="Collapsed">
+                    <StackPanel x:Name="VerticalLyricsPanel" />
+                </ScrollViewer>
             </Grid>
 
             <Grid x:Name="FooterGrid" Grid.Row="2">
@@ -235,11 +276,29 @@
                                   Unchecked="LyricsOnlyCheckBox_Changed"
                                   Foreground="#FFFFFFFF"
                                   Content="Lyrics-only window" />
+                        <CheckBox x:Name="VerticalLyricsCheckBox"
+                                  Margin="0,0,0,10"
+                                  Checked="VerticalLyricsCheckBox_Changed"
+                                  Unchecked="VerticalLyricsCheckBox_Changed"
+                                  Foreground="#FFFFFFFF"
+                                  Content="Vertical lyrics" />
+                        <CheckBox x:Name="AutoLyricsPanelCheckBox"
+                                  Margin="0,0,0,10"
+                                  Checked="AutoLyricsPanelCheckBox_Changed"
+                                  Unchecked="AutoLyricsPanelCheckBox_Changed"
+                                  Foreground="#FFFFFFFF"
+                                  Content="Auto open Apple Music lyrics" />
+                        <CheckBox x:Name="AutoContrastCheckBox"
+                                  Margin="0,0,0,14"
+                                  Checked="AutoContrastCheckBox_Changed"
+                                  Unchecked="AutoContrastCheckBox_Changed"
+                                  Foreground="#FFFFFFFF"
+                                  Content="Auto contrast text" />
 
                         <TextBlock x:Name="LyricOffsetLabel" Foreground="#BFC8D3D8" Text="Lyric lead" />
                         <Slider x:Name="LyricOffsetSlider"
                                 Minimum="0"
-                                Maximum="1200"
+                                Maximum="2200"
                                 TickFrequency="10"
                                 IsSnapToTickEnabled="False"
                                 ValueChanged="LyricOffsetSlider_ValueChanged" />
@@ -267,6 +326,20 @@
                                 Maximum="100"
                                 ValueChanged="BackgroundOpacitySlider_ValueChanged" />
 
+                        <TextBlock x:Name="LyricPositionXLabel" Margin="0,10,0,0" Foreground="#BFC8D3D8" Text="Lyric X" />
+                        <Slider x:Name="LyricPositionXSlider"
+                                Minimum="-360"
+                                Maximum="360"
+                                TickFrequency="1"
+                                ValueChanged="LyricPositionXSlider_ValueChanged" />
+
+                        <TextBlock x:Name="LyricPositionYLabel" Margin="0,10,0,0" Foreground="#BFC8D3D8" Text="Lyric Y" />
+                        <Slider x:Name="LyricPositionYSlider"
+                                Minimum="-180"
+                                Maximum="180"
+                                TickFrequency="1"
+                                ValueChanged="LyricPositionYSlider_ValueChanged" />
+
                         <TextBlock x:Name="MainColorLabel" Margin="0,12,0,6" Foreground="#BFC8D3D8" Text="Main color" />
                         <StackPanel Orientation="Horizontal">
                             <Button Tag="#FFFFFFFF" Background="#FFFFFFFF" Click="MainColorButton_Click" Style="{StaticResource SwatchStyle}" />
@@ -274,6 +347,7 @@
                             <Button Tag="#FFFFE082" Background="#FFFFE082" Click="MainColorButton_Click" Style="{StaticResource SwatchStyle}" />
                             <Button Tag="#FFFF8FB3" Background="#FFFF8FB3" Click="MainColorButton_Click" Style="{StaticResource SwatchStyle}" />
                             <Button Tag="#FFB8FF8B" Background="#FFB8FF8B" Click="MainColorButton_Click" Style="{StaticResource SwatchStyle}" />
+                            <Button Width="58" Height="24" Click="CustomMainColorButton_Click" Content="Custom" Style="{StaticResource ToolButtonStyle}" />
                         </StackPanel>
 
                         <TextBlock x:Name="OriginalColorLabel" Margin="0,12,0,6" Foreground="#BFC8D3D8" Text="Original color" />
@@ -282,6 +356,26 @@
                             <Button Tag="#FFB6C7D8" Background="#FFB6C7D8" Click="OriginalColorButton_Click" Style="{StaticResource SwatchStyle}" />
                             <Button Tag="#FFFFE082" Background="#FFFFE082" Click="OriginalColorButton_Click" Style="{StaticResource SwatchStyle}" />
                             <Button Tag="#FFB8FF8B" Background="#FFB8FF8B" Click="OriginalColorButton_Click" Style="{StaticResource SwatchStyle}" />
+                            <Button Width="58" Height="24" Click="CustomOriginalColorButton_Click" Content="Custom" Style="{StaticResource ToolButtonStyle}" />
+                        </StackPanel>
+
+                        <TextBlock x:Name="BackgroundColorLabel" Margin="0,12,0,6" Foreground="#BFC8D3D8" Text="Background color" />
+                        <StackPanel Orientation="Horizontal">
+                            <Button Tag="#181B22" Background="#FF181B22" Click="BackgroundColorButton_Click" Style="{StaticResource SwatchStyle}" />
+                            <Button Tag="#F7F7F2" Background="#FFF7F7F2" Click="BackgroundColorButton_Click" Style="{StaticResource SwatchStyle}" />
+                            <Button Tag="#101418" Background="#FF101418" Click="BackgroundColorButton_Click" Style="{StaticResource SwatchStyle}" />
+                            <Button Tag="#1F2732" Background="#FF1F2732" Click="BackgroundColorButton_Click" Style="{StaticResource SwatchStyle}" />
+                            <Button Tag="#FFF4E8" Background="#FFFFF4E8" Click="BackgroundColorButton_Click" Style="{StaticResource SwatchStyle}" />
+                            <Button Width="58" Height="24" Click="CustomBackgroundColorButton_Click" Content="Custom" Style="{StaticResource ToolButtonStyle}" />
+                        </StackPanel>
+
+                        <TextBlock x:Name="AccentColorLabel" Margin="0,12,0,6" Foreground="#BFC8D3D8" Text="Accent color" />
+                        <StackPanel Orientation="Horizontal">
+                            <Button Tag="#5DFFE6" Background="#FF5DFFE6" Click="AccentColorButton_Click" Style="{StaticResource SwatchStyle}" />
+                            <Button Tag="#FF4D6D" Background="#FFFF4D6D" Click="AccentColorButton_Click" Style="{StaticResource SwatchStyle}" />
+                            <Button Tag="#8BC7FF" Background="#FF8BC7FF" Click="AccentColorButton_Click" Style="{StaticResource SwatchStyle}" />
+                            <Button Tag="#FFD166" Background="#FFFFD166" Click="AccentColorButton_Click" Style="{StaticResource SwatchStyle}" />
+                            <Button Width="58" Height="24" Click="CustomAccentColorButton_Click" Content="Custom" Style="{StaticResource ToolButtonStyle}" />
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>

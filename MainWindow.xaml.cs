@@ -3,12 +3,16 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Interop;
 using System.Windows.Threading;
+using System.Runtime.InteropServices;
 using AppleMusicTranslator.Models;
 using AppleMusicTranslator.Services;
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
 using WpfBrushes = System.Windows.Media.Brushes;
+using WpfColor = System.Windows.Media.Color;
+using WpfPoint = System.Windows.Point;
 
 namespace AppleMusicTranslator;
 
@@ -22,6 +26,7 @@ public partial class MainWindow : Window
     private readonly AppleMusicLyricAnchorService _anchorService = new();
     private readonly LyricsTranslationService _translationService = new();
     private readonly LrcLibLyricsService _fallbackLyrics = new();
+    private readonly LyricsCacheService _lyricsCache = new();
     private readonly AppSettingsService _settingsService = new();
     private readonly DispatcherTimer _timer;
     private readonly Forms.NotifyIcon _trayIcon;
@@ -46,6 +51,15 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _autoRetryCancellation;
     private DateTime _lastVisibleFallbackRefresh = DateTime.MinValue;
     private string _lastVisibleFallbackSnapshot = string.Empty;
+    private string _lastLyricsPanelRequestTrackKey = string.Empty;
+    private DateTime _lastLyricsPanelRequestUtc = DateTime.MinValue;
+    private bool _usingCachedLyrics;
+    private bool _hasLyricsCacheConflict;
+    private string _lyricsCacheConflictDescription = string.Empty;
+    private bool _draggingLyrics;
+    private WpfPoint _lyricDragStart;
+    private double _lyricDragStartX;
+    private double _lyricDragStartY;
 
     public MainWindow()
     {
@@ -59,7 +73,7 @@ public partial class MainWindow : Window
 
         _timer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromMilliseconds(200)
+            Interval = TimeSpan.FromMilliseconds(160)
         };
         _timer.Tick += Timer_Tick;
 
@@ -71,6 +85,7 @@ public partial class MainWindow : Window
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
+        EnforceTopmost();
         _timer.Start();
         await RefreshMediaStateAsync();
     }
@@ -85,6 +100,7 @@ public partial class MainWindow : Window
         _tickRunning = true;
         try
         {
+            EnforceTopmost();
             await RefreshMediaStateAsync();
         }
         finally
@@ -139,18 +155,31 @@ public partial class MainWindow : Window
         _lastDisplayedLine = string.Empty;
         _lastVisibleFallbackRefresh = DateTime.MinValue;
         _lastVisibleFallbackSnapshot = string.Empty;
-        SetLyricText(string.Empty, _ui.LoadingLyrics, animate: false);
-        StatusText.Text = _ui.ScanningMemory;
-        SourceText.Text = _ui.AppleMusicMemorySource;
+        _lastLyricsPanelRequestTrackKey = string.Empty;
+        _lastLyricsPanelRequestUtc = DateTime.MinValue;
+        _usingCachedLyrics = false;
+        SetLyricsCacheConflict(false, string.Empty);
+        VerticalLyricsPanel.Children.Clear();
+        CenterLyricsView.Visibility = Visibility.Visible;
+        VerticalLyricsView.Visibility = Visibility.Collapsed;
 
-        _ = LoadLyricsAsync(track, _loadCancellation.Token, forceReload, allowAutoRetry);
+        var hasCachedLyrics = TryApplyCachedLyrics(track);
+        if (!hasCachedLyrics)
+        {
+            SetLyricText(string.Empty, _ui.LoadingLyrics, animate: false);
+            StatusText.Text = _ui.ScanningMemory;
+            SourceText.Text = _ui.AppleMusicMemorySource;
+        }
+
+        _ = LoadLyricsAsync(track, _loadCancellation.Token, forceReload, allowAutoRetry, hasCachedLyrics);
     }
 
     private async Task LoadLyricsAsync(
         TrackInfo track,
         CancellationToken cancellationToken,
         bool forceReload,
-        bool allowAutoRetry)
+        bool allowAutoRetry,
+        bool hasCachedLyrics)
     {
         try
         {
@@ -199,6 +228,18 @@ public partial class MainWindow : Window
                     return;
                 }
 
+                if (hasCachedLyrics)
+                {
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        if (track.CacheKey == _loadedTrackKey)
+                        {
+                            StatusText.Text = _ui.CachedLyricsLiveMissed;
+                        }
+                    });
+                    return;
+                }
+
                 if (allowAutoRetry && ScheduleAutoRetry(track, cancellationToken))
                 {
                     await Dispatcher.InvokeAsync(() =>
@@ -224,6 +265,18 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (hasCachedLyrics)
+            {
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (track.CacheKey == _loadedTrackKey)
+                    {
+                        StatusText.Text = _ui.CachedLyricsLiveMissed;
+                    }
+                });
+                return;
+            }
+
             if (allowAutoRetry && ScheduleAutoRetry(track, cancellationToken))
             {
                 await Dispatcher.InvokeAsync(() =>
@@ -241,6 +294,25 @@ public partial class MainWindow : Window
                 StatusText.Text = ex.Message;
             });
         }
+    }
+
+    private bool TryApplyCachedLyrics(TrackInfo track)
+    {
+        if (!_lyricsCache.TryGet(track, out var result) || result.Lyrics.Lines.Count == 0)
+        {
+            return false;
+        }
+
+        _lyrics = result.Lyrics;
+        _usingCachedLyrics = true;
+        _lastDisplayedLine = string.Empty;
+        SourceText.Text = _ui.SourceFor(result.Lyrics.Source);
+        StatusText.Text = _ui.LoadedCachedLyrics(result.Lyrics.Lines.Count);
+        LoadCachedTranslations(result.Lyrics);
+        SetLyricsCacheConflict(result.HasConflict, result.ConflictDescription);
+        UpdateCurrentLyric(_latestTrack);
+        StartBackgroundTranslation(track, result.Lyrics);
+        return true;
     }
 
     private bool ScheduleAutoRetry(TrackInfo track, CancellationToken loadCancellationToken)
@@ -293,12 +365,46 @@ public partial class MainWindow : Window
             }
 
             _lyrics = lyrics;
+            _usingCachedLyrics = LyricsCacheService.IsCachedSource(lyrics.Source);
             _lastDisplayedLine = string.Empty;
             SourceText.Text = _ui.SourceFor(lyrics.Source);
             StatusText.Text = _ui.LoadedLyricLines(lyrics.Lines.Count);
             LoadCachedTranslations(lyrics, clearTranslations);
+            if (!_usingCachedLyrics)
+            {
+                _lyricsCache.Save(track, lyrics);
+            }
+
+            SetLyricsCacheConflict(
+                _lyricsCache.HasConflict(track, lyrics, out var conflictDescription),
+                conflictDescription);
             UpdateCurrentLyric(_latestTrack);
         }).Task;
+    }
+
+    private async Task RequestAppleMusicLyricsPanelAsync(
+        int processId,
+        TrackInfo track,
+        CancellationToken cancellationToken,
+        bool force = false)
+    {
+        if (!_settings.AutoOpenAppleMusicLyricsPanel)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        if (!force
+            && string.Equals(_lastLyricsPanelRequestTrackKey, track.CacheKey, StringComparison.Ordinal)
+            && now - _lastLyricsPanelRequestUtc < TimeSpan.FromSeconds(5))
+        {
+            return;
+        }
+
+        _lastLyricsPanelRequestTrackKey = track.CacheKey;
+        _lastLyricsPanelRequestUtc = now;
+
+        await Task.Run(() => _anchorService.TryOpenLyricsPanel(processId), cancellationToken);
     }
 
     private async Task<LyricsBundle> FindMemoryLyricsAsync(TrackInfo track, bool forceReload, CancellationToken cancellationToken)
@@ -309,7 +415,16 @@ public partial class MainWindow : Window
             return LyricsBundle.Empty(_ui.AppleMusicProcessNotFound);
         }
 
+        await RequestAppleMusicLyricsPanelAsync(processId.Value, track, cancellationToken);
+
         var visibleAnchors = await Task.Run(() => _anchorService.FindVisibleAnchors(processId.Value, track), cancellationToken);
+        if (visibleAnchors.Count == 0)
+        {
+            await RequestAppleMusicLyricsPanelAsync(processId.Value, track, cancellationToken, force: true);
+            await Task.Delay(TimeSpan.FromMilliseconds(180), cancellationToken);
+            visibleAnchors = await Task.Run(() => _anchorService.FindVisibleAnchors(processId.Value, track), cancellationToken);
+        }
+
         if (visibleAnchors.Count > 0)
         {
             await Dispatcher.InvokeAsync(() =>
@@ -477,6 +592,16 @@ public partial class MainWindow : Window
         }
     }
 
+    private void SetLyricsCacheConflict(bool hasConflict, string conflictDescription)
+    {
+        _hasLyricsCacheConflict = hasConflict;
+        _lyricsCacheConflictDescription = conflictDescription;
+        LyricsConflictBadge.Visibility = hasConflict ? Visibility.Visible : Visibility.Collapsed;
+        WrongLyricsButton.ToolTip = hasConflict && !string.IsNullOrWhiteSpace(conflictDescription)
+            ? _ui.LyricsConflictTooltip(conflictDescription)
+            : _ui.WrongLyricsTooltip;
+    }
+
     private void StartBackgroundTranslation(TrackInfo track, LyricsBundle lyrics)
     {
         _translationCancellation?.Cancel();
@@ -629,7 +754,7 @@ public partial class MainWindow : Window
         var translated = line is null ? string.Empty : GetTranslation(line.Text);
         var displayKey = line is null
             ? string.Empty
-            : $"{line.Begin.TotalMilliseconds:0}:{line.Text}:{translated}:{_settings.ShowTranslation}:{_settings.LyricsOnlyMode}";
+            : $"{line.Begin.TotalMilliseconds:0}:{line.Text}:{translated}:{_settings.ShowTranslation}:{_settings.LyricsOnlyMode}:{_settings.LayoutMode}";
 
         if (!force && displayKey == _lastDisplayedLine)
         {
@@ -641,6 +766,17 @@ public partial class MainWindow : Window
         if (line is null)
         {
             SetLyricText(string.Empty, string.Empty);
+            return;
+        }
+
+        if (_settings.LayoutMode == LyricsLayoutMode.Vertical)
+        {
+            UpdateVerticalLyrics(line);
+            if (_settings.ShowTranslation && string.IsNullOrWhiteSpace(translated))
+            {
+                RequestCurrentLineTranslation(line);
+            }
+
             return;
         }
 
@@ -658,6 +794,111 @@ public partial class MainWindow : Window
         }
 
         SetLyricText(line.Text, translated);
+    }
+
+    private void UpdateVerticalLyrics(LyricLine activeLine)
+    {
+        CenterLyricsView.Visibility = Visibility.Collapsed;
+        VerticalLyricsView.Visibility = Visibility.Visible;
+        VerticalLyricsPanel.Children.Clear();
+
+        var background = ColorFromHex(_settings.BackgroundColor, WpfColor.FromRgb(24, 27, 34));
+        var mainColor = ColorFromHex(_settings.MainColor, Colors.White);
+        var originalColor = ColorFromHex(_settings.OriginalColor, WpfColor.FromArgb(0xD5, 0xFF, 0xFF, 0xFF));
+        var accentColor = ColorFromHex(_settings.AccentColor, WpfColor.FromRgb(93, 255, 230));
+        if (_settings.AutoContrastText)
+        {
+            mainColor = EnsureReadable(mainColor, background, preferStrong: true);
+            originalColor = EnsureReadable(originalColor, background, preferStrong: false);
+        }
+
+        var activeIndex = 0;
+        for (var index = 0; index < _lyrics.Lines.Count; index++)
+        {
+            if (ReferenceEquals(_lyrics.Lines[index], activeLine)
+                || _lyrics.Lines[index].Begin == activeLine.Begin && _lyrics.Lines[index].Text == activeLine.Text)
+            {
+                activeIndex = index;
+                break;
+            }
+        }
+
+        for (var index = 0; index < _lyrics.Lines.Count; index++)
+        {
+            var line = _lyrics.Lines[index];
+            var isActive = index == activeIndex;
+            var translated = _settings.ShowTranslation ? GetTranslation(line.Text) : string.Empty;
+            var primaryText = string.IsNullOrWhiteSpace(translated) ? line.Text : translated;
+
+            var linePanel = new StackPanel
+            {
+                Orientation = System.Windows.Controls.Orientation.Vertical
+            };
+
+            if (!string.IsNullOrWhiteSpace(translated))
+            {
+                linePanel.Children.Add(CreateLyricTextBlock(
+                    line.Text,
+                    originalColor,
+                    isActive ? _settings.OriginalFontSize : Math.Max(12, _settings.OriginalFontSize - 2),
+                    isActive ? 0.82 : 0.38,
+                    FontWeights.Normal));
+            }
+
+            linePanel.Children.Add(CreateLyricTextBlock(
+                primaryText,
+                isActive ? mainColor : originalColor,
+                isActive ? _settings.MainFontSize : Math.Max(14, _settings.OriginalFontSize + 1),
+                isActive ? 1.0 : 0.42,
+                isActive ? FontWeights.Bold : FontWeights.SemiBold));
+
+            var border = new Border
+            {
+                Margin = new Thickness(0, isActive ? 8 : 4, 0, isActive ? 8 : 4),
+                Padding = new Thickness(isActive ? 14 : 8, isActive ? 10 : 6, isActive ? 14 : 8, isActive ? 10 : 6),
+                BorderThickness = isActive ? new Thickness(0, 0, 0, 2) : new Thickness(0),
+                BorderBrush = new SolidColorBrush(accentColor),
+                Opacity = isActive ? 1 : 0.72,
+                Child = linePanel
+            };
+
+            VerticalLyricsPanel.Children.Add(border);
+        }
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            VerticalLyricsView.UpdateLayout();
+            if (activeIndex >= VerticalLyricsPanel.Children.Count
+                || VerticalLyricsPanel.Children[activeIndex] is not FrameworkElement activeElement)
+            {
+                return;
+            }
+
+            var point = activeElement.TranslatePoint(new WpfPoint(0, 0), VerticalLyricsPanel);
+            var target = Math.Max(0, point.Y - Math.Max(40, VerticalLyricsView.ViewportHeight * 0.35));
+            VerticalLyricsView.ScrollToVerticalOffset(target);
+        }, DispatcherPriority.Background);
+    }
+
+    private static TextBlock CreateLyricTextBlock(
+        string text,
+        WpfColor color,
+        double fontSize,
+        double opacity,
+        FontWeight weight)
+    {
+        return new TextBlock
+        {
+            Text = text,
+            Foreground = new SolidColorBrush(color),
+            FontFamily = new System.Windows.Media.FontFamily("Microsoft YaHei UI"),
+            FontSize = fontSize,
+            FontWeight = weight,
+            Opacity = opacity,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 2, 0, 2)
+        };
     }
 
     private string GetTranslation(string text)
@@ -678,6 +919,10 @@ public partial class MainWindow : Window
         _lastDisplayedLine = string.Empty;
         _lastVisibleFallbackRefresh = DateTime.MinValue;
         _lastVisibleFallbackSnapshot = string.Empty;
+        _lastLyricsPanelRequestTrackKey = string.Empty;
+        _lastLyricsPanelRequestUtc = DateTime.MinValue;
+        _usingCachedLyrics = false;
+        SetLyricsCacheConflict(false, string.Empty);
 
         lock (_translationLock)
         {
@@ -686,6 +931,9 @@ public partial class MainWindow : Window
         }
 
         SetLyricText(string.Empty, message, animate: false);
+        VerticalLyricsPanel.Children.Clear();
+        CenterLyricsView.Visibility = Visibility.Visible;
+        VerticalLyricsView.Visibility = Visibility.Collapsed;
         SourceText.Text = _ui.AppleMusicMemorySource;
         SongProgress.Maximum = 1;
         SongProgress.Value = 0;
@@ -698,10 +946,15 @@ public partial class MainWindow : Window
         {
             ShowTranslationCheckBox.IsChecked = _settings.ShowTranslation;
             LyricsOnlyCheckBox.IsChecked = _settings.LyricsOnlyMode;
+            VerticalLyricsCheckBox.IsChecked = _settings.LayoutMode == LyricsLayoutMode.Vertical;
+            AutoLyricsPanelCheckBox.IsChecked = _settings.AutoOpenAppleMusicLyricsPanel;
+            AutoContrastCheckBox.IsChecked = _settings.AutoContrastText;
             MainFontSlider.Value = _settings.MainFontSize;
             OriginalFontSlider.Value = _settings.OriginalFontSize;
             BackgroundOpacitySlider.Value = _settings.BackgroundOpacity * 100;
             LyricOffsetSlider.Value = _settings.LyricOffsetMs;
+            LyricPositionXSlider.Value = _settings.LyricOffsetX;
+            LyricPositionYSlider.Value = _settings.LyricOffsetY;
             SelectLanguageComboItem();
         }
         finally
@@ -730,11 +983,26 @@ public partial class MainWindow : Window
         _ui = UiText.For(_settings.InterfaceLanguage);
         ApplyLocalizedText();
 
+        var backgroundColor = ColorFromHex(_settings.BackgroundColor, WpfColor.FromRgb(24, 27, 34));
+        var mainColor = ColorFromHex(_settings.MainColor, Colors.White);
+        var originalColor = ColorFromHex(_settings.OriginalColor, WpfColor.FromArgb(0xD5, 0xFF, 0xFF, 0xFF));
+        if (_settings.AutoContrastText)
+        {
+            mainColor = EnsureReadable(mainColor, backgroundColor, preferStrong: true);
+            originalColor = EnsureReadable(originalColor, backgroundColor, preferStrong: false);
+        }
+
         MainLyricText.FontSize = _settings.MainFontSize;
         MainLyricText.LineHeight = Math.Max(_settings.MainFontSize * 1.24, _settings.MainFontSize + 4);
         OriginalText.FontSize = _settings.OriginalFontSize;
-        MainLyricText.Foreground = BrushFromHex(_settings.MainColor, Colors.White);
-        OriginalText.Foreground = BrushFromHex(_settings.OriginalColor, Colors.White);
+        MainLyricText.Foreground = new SolidColorBrush(mainColor);
+        OriginalText.Foreground = new SolidColorBrush(originalColor);
+
+        LyricContentTransform.X = _settings.LyricOffsetX;
+        LyricContentTransform.Y = _settings.LyricOffsetY;
+
+        CenterLyricsView.Visibility = _settings.LayoutMode == LyricsLayoutMode.Center ? Visibility.Visible : Visibility.Collapsed;
+        VerticalLyricsView.Visibility = _settings.LayoutMode == LyricsLayoutMode.Vertical ? Visibility.Visible : Visibility.Collapsed;
 
         HeaderGrid.Visibility = _settings.LyricsOnlyMode ? Visibility.Collapsed : Visibility.Visible;
         FooterGrid.Visibility = _settings.LyricsOnlyMode ? Visibility.Collapsed : Visibility.Visible;
@@ -748,10 +1016,16 @@ public partial class MainWindow : Window
         Shell.CornerRadius = _settings.LyricsOnlyMode ? new CornerRadius(0) : new CornerRadius(8);
         Shell.Background = _settings.LyricsOnlyMode
             ? WpfBrushes.Transparent
-            : new SolidColorBrush(System.Windows.Media.Color.FromArgb((byte)Math.Clamp(_settings.BackgroundOpacity * 255, 0, 255), 24, 27, 34));
+            : new SolidColorBrush(WpfColor.FromArgb(
+                (byte)Math.Clamp(_settings.BackgroundOpacity * 255, 0, 255),
+                backgroundColor.R,
+                backgroundColor.G,
+                backgroundColor.B));
         Shell.BorderBrush = BrushFromHex(WithAlpha(_settings.AccentColor, _settings.BorderOpacity), System.Windows.Media.Colors.Cyan);
+        SettingsPanel.BorderBrush = Shell.BorderBrush;
 
         LyricGrid.Margin = _settings.LyricsOnlyMode ? new Thickness(0) : new Thickness(0, 18, 0, 12);
+        EnforceTopmost();
         UpdateCurrentLyric(_latestTrack, force: true);
     }
 
@@ -764,14 +1038,24 @@ public partial class MainWindow : Window
         SettingsPanelTitle.Text = _ui.DisplaySettings;
         ShowTranslationCheckBox.Content = _ui.ShowTranslation;
         LyricsOnlyCheckBox.Content = _ui.LyricsOnlyWindow;
+        VerticalLyricsCheckBox.Content = _ui.VerticalLyrics;
+        AutoLyricsPanelCheckBox.Content = _ui.AutoOpenLyricsPanel;
+        AutoContrastCheckBox.Content = _ui.AutoContrastText;
         InterfaceLanguageLabel.Text = _ui.InterfaceLanguage;
         LyricOffsetLabel.Text = $"{_ui.LyricsOffset}: {_ui.LyricOffsetValue(_settings.LyricOffsetMs)}";
         LyricOffsetHintText.Text = _ui.LyricsOffsetHint;
         MainFontLabel.Text = _ui.MainTextSize;
         OriginalFontLabel.Text = _ui.OriginalTextSize;
         BackgroundOpacityLabel.Text = _ui.BackgroundOpacity;
+        LyricPositionXLabel.Text = $"{_ui.LyricPositionX}: {_ui.LyricPositionValue(_settings.LyricOffsetX)}";
+        LyricPositionYLabel.Text = $"{_ui.LyricPositionY}: {_ui.LyricPositionValue(_settings.LyricOffsetY)}";
         MainColorLabel.Text = _ui.MainColor;
         OriginalColorLabel.Text = _ui.OriginalColor;
+        BackgroundColorLabel.Text = _ui.BackgroundColor;
+        AccentColorLabel.Text = _ui.AccentColor;
+        WrongLyricsButton.ToolTip = _hasLyricsCacheConflict && !string.IsNullOrWhiteSpace(_lyricsCacheConflictDescription)
+            ? _ui.LyricsConflictTooltip(_lyricsCacheConflictDescription)
+            : _ui.WrongLyricsTooltip;
         RefreshButton.ToolTip = _ui.RescanLyricsTooltip;
         MinimizeButton.ToolTip = _ui.Minimize;
         CloseButton.ToolTip = _ui.HideWindow;
@@ -816,11 +1100,62 @@ public partial class MainWindow : Window
         }
     }
 
+    private static WpfColor ColorFromHex(string value, WpfColor fallback)
+    {
+        try
+        {
+            return (WpfColor)System.Windows.Media.ColorConverter.ConvertFromString(NormalizeHexColor(value, includeAlpha: true));
+        }
+        catch
+        {
+            return fallback;
+        }
+    }
+
+    private static WpfColor EnsureReadable(WpfColor requested, WpfColor background, bool preferStrong)
+    {
+        var contrast = ContrastRatio(requested, background);
+        if (contrast >= (preferStrong ? 4.5 : 3.2))
+        {
+            return requested;
+        }
+
+        var white = WpfColor.FromArgb(requested.A, 255, 255, 255);
+        var black = WpfColor.FromArgb(requested.A, 12, 14, 18);
+        return ContrastRatio(white, background) >= ContrastRatio(black, background)
+            ? white
+            : black;
+    }
+
+    private static double ContrastRatio(WpfColor foreground, WpfColor background)
+    {
+        var front = RelativeLuminance(foreground);
+        var back = RelativeLuminance(background);
+        var lighter = Math.Max(front, back);
+        var darker = Math.Min(front, back);
+        return (lighter + 0.05) / (darker + 0.05);
+    }
+
+    private static double RelativeLuminance(WpfColor color)
+    {
+        static double Channel(byte value)
+        {
+            var scaled = value / 255.0;
+            return scaled <= 0.03928
+                ? scaled / 12.92
+                : Math.Pow((scaled + 0.055) / 1.055, 2.4);
+        }
+
+        return 0.2126 * Channel(color.R)
+            + 0.7152 * Channel(color.G)
+            + 0.0722 * Channel(color.B);
+    }
+
     private static string WithAlpha(string value, double opacity)
     {
         try
         {
-            var color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(value);
+            var color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(NormalizeHexColor(value, includeAlpha: true));
             color.A = (byte)Math.Clamp(opacity * 255, 0, 255);
             return color.ToString();
         }
@@ -828,6 +1163,22 @@ public partial class MainWindow : Window
         {
             return "#665DFFE6";
         }
+    }
+
+    private static string NormalizeHexColor(string value, bool includeAlpha)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? "#FFFFFF" : value.Trim();
+        if (!normalized.StartsWith('#'))
+        {
+            normalized = "#" + normalized;
+        }
+
+        if (normalized.Length == 7 && includeAlpha)
+        {
+            normalized = "#FF" + normalized[1..];
+        }
+
+        return normalized;
     }
 
     private void ToggleSettingsPanel()
@@ -846,9 +1197,35 @@ public partial class MainWindow : Window
     {
         Show();
         WindowState = WindowState.Normal;
-        Activate();
-        Topmost = false;
         Topmost = true;
+        EnforceTopmost();
+        Activate();
+    }
+
+    private void EnforceTopmost()
+    {
+        if (!IsVisible)
+        {
+            return;
+        }
+
+        Topmost = true;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        SetWindowPos(
+            handle,
+            HwndTopmost,
+            0,
+            0,
+            0,
+            0,
+            SetWindowPosFlags.NoMove
+            | SetWindowPosFlags.NoSize
+            | SetWindowPosFlags.NoActivate);
     }
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e)
@@ -857,6 +1234,24 @@ public partial class MainWindow : Window
         {
             BeginLoadLyrics(_latestTrack, forceReload: true);
         }
+    }
+
+    private void WrongLyricsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_latestTrack.HasSongIdentity)
+        {
+            return;
+        }
+
+        var removed = _lyricsCache.Delete(_latestTrack);
+        _usingCachedLyrics = false;
+        SetLyricsCacheConflict(false, string.Empty);
+        StatusText.Text = removed ? _ui.DeletedCachedLyrics : _ui.NoCachedLyricsToDelete;
+        _lyrics = LyricsBundle.Empty("Deleted cached lyrics");
+        _lastDisplayedLine = string.Empty;
+        VerticalLyricsPanel.Children.Clear();
+        SetLyricText(string.Empty, _ui.LoadingLyrics, animate: false);
+        BeginLoadLyrics(_latestTrack, forceReload: true);
     }
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e) => ToggleSettingsPanel();
@@ -906,6 +1301,41 @@ public partial class MainWindow : Window
         SaveAndApplySettings();
     }
 
+    private void VerticalLyricsCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_applyingSettings)
+        {
+            return;
+        }
+
+        _settings.LayoutMode = VerticalLyricsCheckBox.IsChecked == true
+            ? LyricsLayoutMode.Vertical
+            : LyricsLayoutMode.Center;
+        SaveAndApplySettings();
+    }
+
+    private void AutoLyricsPanelCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_applyingSettings)
+        {
+            return;
+        }
+
+        _settings.AutoOpenAppleMusicLyricsPanel = AutoLyricsPanelCheckBox.IsChecked == true;
+        SaveAndApplySettings();
+    }
+
+    private void AutoContrastCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_applyingSettings)
+        {
+            return;
+        }
+
+        _settings.AutoContrastText = AutoContrastCheckBox.IsChecked == true;
+        SaveAndApplySettings();
+    }
+
     private void InterfaceLanguageComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_applyingSettings || InterfaceLanguageComboBox.SelectedItem is not ComboBoxItem item)
@@ -929,6 +1359,30 @@ public partial class MainWindow : Window
 
         _settings.LyricOffsetMs = (int)Math.Round(e.NewValue);
         LyricOffsetLabel.Text = $"{_ui.LyricsOffset}: {_ui.LyricOffsetValue(_settings.LyricOffsetMs)}";
+        SaveAndApplySettings();
+    }
+
+    private void LyricPositionXSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_applyingSettings || _settings is null)
+        {
+            return;
+        }
+
+        _settings.LyricOffsetX = Math.Round(e.NewValue);
+        LyricPositionXLabel.Text = $"{_ui.LyricPositionX}: {_ui.LyricPositionValue(_settings.LyricOffsetX)}";
+        SaveAndApplySettings();
+    }
+
+    private void LyricPositionYSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_applyingSettings || _settings is null)
+        {
+            return;
+        }
+
+        _settings.LyricOffsetY = Math.Round(e.NewValue);
+        LyricPositionYLabel.Text = $"{_ui.LyricPositionY}: {_ui.LyricPositionValue(_settings.LyricOffsetY)}";
         SaveAndApplySettings();
     }
 
@@ -983,6 +1437,63 @@ public partial class MainWindow : Window
         }
     }
 
+    private void BackgroundColorButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { Tag: string color })
+        {
+            _settings.BackgroundColor = color;
+            SaveAndApplySettings();
+        }
+    }
+
+    private void AccentColorButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { Tag: string color })
+        {
+            _settings.AccentColor = color;
+            SaveAndApplySettings();
+        }
+    }
+
+    private void CustomMainColorButton_Click(object sender, RoutedEventArgs e)
+    {
+        PickColor(_settings.MainColor, color => _settings.MainColor = color);
+    }
+
+    private void CustomOriginalColorButton_Click(object sender, RoutedEventArgs e)
+    {
+        PickColor(_settings.OriginalColor, color => _settings.OriginalColor = color);
+    }
+
+    private void CustomBackgroundColorButton_Click(object sender, RoutedEventArgs e)
+    {
+        PickColor(_settings.BackgroundColor, color => _settings.BackgroundColor = color);
+    }
+
+    private void CustomAccentColorButton_Click(object sender, RoutedEventArgs e)
+    {
+        PickColor(_settings.AccentColor, color => _settings.AccentColor = color);
+    }
+
+    private void PickColor(string current, Action<string> apply)
+    {
+        var color = ColorFromHex(current, Colors.White);
+        using var dialog = new Forms.ColorDialog
+        {
+            AllowFullOpen = true,
+            FullOpen = true,
+            Color = Drawing.Color.FromArgb(color.R, color.G, color.B)
+        };
+
+        if (dialog.ShowDialog() != Forms.DialogResult.OK)
+        {
+            return;
+        }
+
+        apply($"#FF{dialog.Color.R:X2}{dialog.Color.G:X2}{dialog.Color.B:X2}");
+        SaveAndApplySettings();
+    }
+
     private void ToggleTranslation()
     {
         _settings.ShowTranslation = !_settings.ShowTranslation;
@@ -1010,6 +1521,66 @@ public partial class MainWindow : Window
         if (e.ButtonState == MouseButtonState.Pressed)
         {
             DragMove();
+        }
+    }
+
+    private void LyricGrid_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (SettingsPanel.Visibility == Visibility.Visible)
+        {
+            return;
+        }
+
+        _draggingLyrics = true;
+        _lyricDragStart = e.GetPosition(this);
+        _lyricDragStartX = _settings.LyricOffsetX;
+        _lyricDragStartY = _settings.LyricOffsetY;
+        LyricGrid.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void LyricGrid_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (!_draggingLyrics)
+        {
+            return;
+        }
+
+        var current = e.GetPosition(this);
+        _settings.LyricOffsetX = Math.Clamp(Math.Round(_lyricDragStartX + current.X - _lyricDragStart.X), -360, 360);
+        _settings.LyricOffsetY = Math.Clamp(Math.Round(_lyricDragStartY + current.Y - _lyricDragStart.Y), -180, 180);
+        LyricContentTransform.X = _settings.LyricOffsetX;
+        LyricContentTransform.Y = _settings.LyricOffsetY;
+        UpdatePositionSliders();
+        e.Handled = true;
+    }
+
+    private void LyricGrid_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_draggingLyrics)
+        {
+            return;
+        }
+
+        _draggingLyrics = false;
+        LyricGrid.ReleaseMouseCapture();
+        _settingsService.Save(_settings);
+        e.Handled = true;
+    }
+
+    private void UpdatePositionSliders()
+    {
+        _applyingSettings = true;
+        try
+        {
+            LyricPositionXSlider.Value = _settings.LyricOffsetX;
+            LyricPositionYSlider.Value = _settings.LyricOffsetY;
+            LyricPositionXLabel.Text = $"{_ui.LyricPositionX}: {_ui.LyricPositionValue(_settings.LyricOffsetX)}";
+            LyricPositionYLabel.Text = $"{_ui.LyricPositionY}: {_ui.LyricPositionValue(_settings.LyricOffsetY)}";
+        }
+        finally
+        {
+            _applyingSettings = false;
         }
     }
 
@@ -1174,4 +1745,25 @@ public partial class MainWindow : Window
         _trayIcon.Dispose();
         base.OnClosed(e);
     }
+
+    private static readonly IntPtr HwndTopmost = new(-1);
+
+    [Flags]
+    private enum SetWindowPosFlags : uint
+    {
+        NoSize = 0x0001,
+        NoMove = 0x0002,
+        NoActivate = 0x0010,
+        ShowWindow = 0x0040
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        IntPtr hWnd,
+        IntPtr hWndInsertAfter,
+        int x,
+        int y,
+        int cx,
+        int cy,
+        SetWindowPosFlags flags);
 }

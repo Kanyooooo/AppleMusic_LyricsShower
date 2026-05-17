@@ -6,6 +6,12 @@ public sealed class AppSettings
 
     public bool LyricsOnlyMode { get; set; }
 
+    public bool AutoOpenAppleMusicLyricsPanel { get; set; } = true;
+
+    public bool AutoContrastText { get; set; } = true;
+
+    public LyricsLayoutMode LayoutMode { get; set; } = LyricsLayoutMode.Center;
+
     public UiLanguage InterfaceLanguage { get; set; } = UiLanguage.ChineseSimplified;
 
     public double OriginalFontSize { get; set; } = 18;
@@ -16,11 +22,17 @@ public sealed class AppSettings
 
     public double BorderOpacity { get; set; } = 0.45;
 
-    public int LyricOffsetMs { get; set; } = 720;
+    public int LyricOffsetMs { get; set; } = 950;
+
+    public double LyricOffsetX { get; set; }
+
+    public double LyricOffsetY { get; set; }
 
     public string OriginalColor { get; set; } = "#D5FFFFFF";
 
     public string MainColor { get; set; } = "#FFFFFFFF";
+
+    public string BackgroundColor { get; set; } = "#181B22";
 
     public string AccentColor { get; set; } = "#5DFFE6";
 }

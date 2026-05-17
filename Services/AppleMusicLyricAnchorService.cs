@@ -73,6 +73,26 @@ public sealed partial class AppleMusicLyricAnchorService
         }
     }
 
+    public bool TryOpenLyricsPanel(int processId)
+    {
+        try
+        {
+            foreach (var window in FindAppleMusicWindows(processId))
+            {
+                if (TryOpenLyricsPanel(window))
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
     private static IReadOnlyList<AutomationElement> FindAppleMusicWindows(int processId)
     {
         var windows = new List<AutomationElement>();
@@ -238,6 +258,108 @@ public sealed partial class AppleMusicLyricAnchorService
             {
                 // Best-effort only.
             }
+        }
+    }
+
+    private static bool TryOpenLyricsPanel(AutomationElement root)
+    {
+        AutomationElementCollection elements;
+        try
+        {
+            elements = root.FindAll(
+                TreeScope.Descendants,
+                new OrCondition(
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.CheckBox),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem)));
+        }
+        catch
+        {
+            return false;
+        }
+
+        foreach (AutomationElement element in elements)
+        {
+            if (!LooksLikeLyricsButton(element))
+            {
+                continue;
+            }
+
+            if (TryTurnOnToggle(element) || TryInvoke(element))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool LooksLikeLyricsButton(AutomationElement element)
+    {
+        var name = SafeCurrentString(element, AutomationElement.NameProperty);
+        var automationId = SafeCurrentString(element, AutomationElement.AutomationIdProperty);
+        var helpText = SafeCurrentString(element, AutomationElement.HelpTextProperty);
+        var combined = $"{name} {automationId} {helpText}".ToLowerInvariant();
+
+        return combined.Contains("lyrics", StringComparison.Ordinal)
+            || combined.Contains("lyric", StringComparison.Ordinal)
+            || combined.Contains("歌詞", StringComparison.Ordinal)
+            || combined.Contains("歌词", StringComparison.Ordinal)
+            || combined.Contains("karaoke", StringComparison.Ordinal);
+    }
+
+    private static bool TryTurnOnToggle(AutomationElement element)
+    {
+        try
+        {
+            if (!element.TryGetCurrentPattern(TogglePattern.Pattern, out var pattern)
+                || pattern is not TogglePattern toggle)
+            {
+                return false;
+            }
+
+            if (toggle.Current.ToggleState == ToggleState.On)
+            {
+                return true;
+            }
+
+            toggle.Toggle();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryInvoke(AutomationElement element)
+    {
+        try
+        {
+            if (!element.TryGetCurrentPattern(InvokePattern.Pattern, out var pattern)
+                || pattern is not InvokePattern invoke)
+            {
+                return false;
+            }
+
+            invoke.Invoke();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string SafeCurrentString(AutomationElement element, AutomationProperty property)
+    {
+        try
+        {
+            return element.GetCurrentPropertyValue(property) as string ?? string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
         }
     }
 

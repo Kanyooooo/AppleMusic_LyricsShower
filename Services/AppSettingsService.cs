@@ -70,14 +70,41 @@ public sealed class AppSettingsService
             settings.LyricOffsetMs = new AppSettings().LyricOffsetMs;
             changed = true;
         }
-        else if (isLegacySettings && settings.LyricOffsetMs == 500)
+        else if (isLegacySettings && settings.LyricOffsetMs is 500 or 720)
         {
             settings.LyricOffsetMs = new AppSettings().LyricOffsetMs;
             changed = true;
         }
 
+        if (!rawJson.Contains(nameof(AppSettings.AutoOpenAppleMusicLyricsPanel), StringComparison.Ordinal))
+        {
+            settings.AutoOpenAppleMusicLyricsPanel = true;
+            changed = true;
+        }
+
+        if (!rawJson.Contains(nameof(AppSettings.AutoContrastText), StringComparison.Ordinal))
+        {
+            settings.AutoContrastText = true;
+            changed = true;
+        }
+
+        if (!rawJson.Contains(nameof(AppSettings.BackgroundColor), StringComparison.Ordinal))
+        {
+            settings.BackgroundColor = new AppSettings().BackgroundColor;
+            changed = true;
+        }
+
         var originalOffset = settings.LyricOffsetMs;
-        settings.LyricOffsetMs = Math.Clamp(settings.LyricOffsetMs, 0, 1200);
-        return changed || settings.LyricOffsetMs != originalOffset;
+        settings.LyricOffsetMs = Math.Clamp(settings.LyricOffsetMs, 0, 2200);
+
+        var originalX = settings.LyricOffsetX;
+        var originalY = settings.LyricOffsetY;
+        settings.LyricOffsetX = Math.Clamp(settings.LyricOffsetX, -360, 360);
+        settings.LyricOffsetY = Math.Clamp(settings.LyricOffsetY, -180, 180);
+
+        return changed
+            || settings.LyricOffsetMs != originalOffset
+            || Math.Abs(settings.LyricOffsetX - originalX) > 0.01
+            || Math.Abs(settings.LyricOffsetY - originalY) > 0.01;
     }
 }

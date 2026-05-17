@@ -1,40 +1,92 @@
-# AppleMusic_LyricsShower 🎸
-这是一个针对 Windows 版 Apple Music 的内存级取证与歌词提取工具。本项目放弃了传统的外部 API 调用，直接深入操作系统底层，通过扫描并提取目标进程的动态内存池 (Memory Pool)，实现了官方 TTML 歌词数据的实时截获，并以极简 UI 将提取结果映射至桌面。
+# AppleMusic Translator
 
-## 🌟 核心特性
-### 动态内存指纹匹配 (Dynamic Memory Fingerprinting)：
-抛弃了不可靠的句柄抓取。采用多维评分引擎，将 WinSDK 截获的 SMTC 时长指纹与内存中 TTML 数据块的字符熵进行哈希碰撞。在复杂的内存页面中精准定位当前播放进程的活动数据，彻底绕过相似时长歌曲的特征混淆。
+Windows Apple Music 歌词翻译悬浮窗。它会读取 Apple Music 当前播放信息，优先从 Apple Music 进程内存里抓官方 TTML 同步歌词，再后台懒加载翻译。
 
-### 物理级内存寻址与边界爆破 (Memory Pool Boundary Extraction)：
-利用 VirtualQueryEx 遍历目标进程的 MEM_COMMIT 内存页。针对 Apple Music 极易产生“脏数据”的垃圾回收机制，引入非贪婪正则进行物理级内存切割。通过锁定 </tt> 闭合标签作为安全边界，强行阻断内存溢出与上下文越界，彻底消灭了多首歌曲缓存导致的“幽灵数据缝合”现象。
+> 这个项目是 `AppleMusic_LyricsShower` 的重写版：核心仍然是内存取证式抓歌词，但现在更偏向稳定、低误判和可日常使用。
 
-### 进程休眠击穿与状态注入 (Process State Forcing & Injection)：
-针对目标应用后台挂起时停止网络请求的“懒加载”防御机制，编写了专门的绕过逻辑。通过 UIAutomation 向目标进程底层注入模拟器信号，强行唤醒窗口并触发隐藏的歌词拉取函数，实现“无感击穿”，强制目标进程向苹果服务器发起请求并将数据暴露至内存。
+## 功能
 
-### 我失败的渲染层对抗和有点用的垃圾代码：
-**DWM 级边框抹除：** 通过篡改 setWindowFlags 属性，绕过 Windows 11 Desktop Window Manager (DWM) 的强制阴影渲染，却还是搞不明白为什么边框依旧存在。
+- 识别 Windows Apple Music 当前曲目、歌手、专辑、进度和时长。
+- 扫描 Apple Music 进程内存，解析官方 TTML 同步歌词。
+- 使用 Apple Music 右侧歌词面板的可见文本做兜底，处理部分歌曲没有连续 TTML XML 的情况。
+- 第一次没抓到时会自动延迟重扫一次，减少切歌瞬间歌词还没进内存导致的漏抓。
+- 后台懒加载翻译，先显示歌词，翻译缓存命中后自动补上中文。
+- 支持显示/隐藏翻译、歌词提前量、字体大小、颜色、背景透明度。
+- 支持仅歌词模式，并提供托盘菜单找回设置窗口。
+- LRCLIB 备用源：内存歌词和可见歌词都不可用时再尝试。
 
-**独立时钟状态机：** 基于 PySide6 动画组构建独立渲染线程。根据提取到的 TTML 时间戳与当前系统时间差，动态计算并注入 0.5s 对称呼吸动效，无视宿主进程的 UI 卡顿。
+## 匹配策略
 
-## 🛠️ 技术栈
-**进程通信与越权读取：** Pymem (Windows API 封装，突破进程隔离)
-**系统总线监听：** WinSDK (接管系统 SMTC 媒体总线)
-**底层信号模拟：** UIAutomation (绕过沙盒进行后台事件注入)
-**GUI 映射层：** PySide6 (Qt for Python 硬件加速渲染)
+为避免串歌，匹配逻辑比较保守：
 
-## 🚀 快速开始
-发布了release，可以直接下载直接运行。
-如果要部署，一般只需要运行gui_main就可以，一般需要一下依赖库：
+- 有 Apple Music 可见歌词锚点时，要求内存 TTML 候选命中这些锚点。
+- 没有锚点时，只接受时长非常接近且明显优于其他候选的结果。
+- 如果官方 TTML 没有命中，但右侧歌词面板能读到文本，会切到 `Apple Music visible lyrics` 兜底模式。
+- 兜底模式会定时读取右侧面板当前可见歌词，因此请保持 Apple Music 歌词面板打开。
+
+## 运行
+
+需要 Windows 10 19041+ / Windows 11，以及 .NET 8 SDK。
+
+```powershell
+dotnet run .\AppleMusicTranslator.csproj
 ```
-pip install PySide6 pymem psutil winsdk uiautomation
+
+如果只想编译检查：
+
+```powershell
+dotnet build .\AppleMusicTranslator.csproj -c Release
 ```
 
-## 📝 开发者说明
-这个项目诞生的初衷是为了追求极致的桌面歌词体验。在开发过程中，我不再像用类似于“网络检索”的方式查询歌词和对其时间线，通过简单的逆向和内存监控理解了 Apple Music 在内存里的样子，爬取信息后来实时呈现歌词。
+## 打包
 
-## 🤝 支持与联系
-如果您喜欢这个项目，欢迎点一个 Star ⭐️。
-开发者邮箱：1531516107@qq.com
+发布成单文件 exe：
 
-### 关于后续计划
-目前该项目稳定性尚足，后续将根据用户反馈进行维护。
+```powershell
+dotnet publish .\AppleMusicTranslator.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:PublishReadyToRun=true /p:IncludeNativeLibrariesForSelfExtract=true
+```
+
+默认输出在：
+
+```text
+bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\AppleMusicTranslator.exe
+```
+
+## 使用建议
+
+1. 先打开 Apple Music 并播放歌曲。
+2. 打开 Apple Music 右侧歌词面板。
+3. 启动本工具。
+4. 如果提示没有歌词，点刷新按钮或托盘菜单里的“重新扫描歌词”。
+
+切歌时工具会自动快速扫描；如果第一次没赶上 Apple Music 写入歌词内存，会自动再扫描一次。
+
+## 数据与缓存
+
+翻译使用 Google Translate 的公开接口，结果会缓存在本机：
+
+```text
+%AppData%\AppleMusicTranslator\translation-cache.json
+```
+
+本工具会读取 Apple Music 进程内存来寻找歌词，不会修改 Apple Music 进程。
+
+## 诊断
+
+仓库里带了一个诊断项目，可以查看当前曲目、可见歌词锚点和内存 TTML 候选：
+
+```powershell
+dotnet run --project .\Diagnostics\AppleMusicTranslator.Diagnostics.csproj -c Release
+```
+
+搜索进程内存中的某段文本：
+
+```powershell
+dotnet run --project .\Diagnostics\AppleMusicTranslator.Diagnostics.csproj -c Release -- search "歌词片段"
+```
+
+## 已知限制
+
+- Apple Music 的 Windows 客户端不同版本内存布局差异很大，部分歌曲可能只有渲染后的歌词文本，没有完整连续 TTML XML。
+- 可见歌词兜底依赖 Apple Music 右侧歌词面板，面板关闭时无法工作。
+- 可见歌词兜底没有官方逐行时间戳，只适合作为“能看到和翻译当前歌词”的保底方案。

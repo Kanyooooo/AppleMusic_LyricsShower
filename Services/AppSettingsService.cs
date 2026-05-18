@@ -104,6 +104,14 @@ public sealed class AppSettingsService
         {
             settings.WindowWidth = new AppSettings().WindowWidth;
             settings.WindowHeight = new AppSettings().WindowHeight;
+            settings.LyricsOnlyWidth = new AppSettings().LyricsOnlyWidth;
+            settings.LyricsOnlyHeight = new AppSettings().LyricsOnlyHeight;
+            changed = true;
+        }
+
+        if (!rawJson.Contains(nameof(AppSettings.LockLyricsPosition), StringComparison.Ordinal))
+        {
+            settings.LockLyricsPosition = true;
             changed = true;
         }
 
@@ -134,11 +142,15 @@ public sealed class AppSettingsService
 
         var originalWindowWidth = settings.WindowWidth;
         var originalWindowHeight = settings.WindowHeight;
+        var originalLyricsOnlyWidth = settings.LyricsOnlyWidth;
+        var originalLyricsOnlyHeight = settings.LyricsOnlyHeight;
         var originalIslandWidth = settings.IslandWidth;
         var originalIslandHeight = settings.IslandHeight;
         var originalIslandTopOffset = settings.IslandTopOffset;
         settings.WindowWidth = Math.Clamp(settings.WindowWidth, 520, 2200);
         settings.WindowHeight = Math.Clamp(settings.WindowHeight, 180, 1400);
+        settings.LyricsOnlyWidth = Math.Clamp(settings.LyricsOnlyWidth, 360, 2200);
+        settings.LyricsOnlyHeight = Math.Clamp(settings.LyricsOnlyHeight, 120, 900);
         settings.IslandWidth = Math.Clamp(settings.IslandWidth, 360, 1200);
         settings.IslandHeight = Math.Clamp(settings.IslandHeight, 68, 180);
         settings.IslandTopOffset = Math.Clamp(settings.IslandTopOffset, 0, 120);
@@ -149,6 +161,8 @@ public sealed class AppSettingsService
             || Math.Abs(settings.LyricOffsetY - originalY) > 0.01
             || Math.Abs(settings.WindowWidth - originalWindowWidth) > 0.01
             || Math.Abs(settings.WindowHeight - originalWindowHeight) > 0.01
+            || Math.Abs(settings.LyricsOnlyWidth - originalLyricsOnlyWidth) > 0.01
+            || Math.Abs(settings.LyricsOnlyHeight - originalLyricsOnlyHeight) > 0.01
             || Math.Abs(settings.IslandWidth - originalIslandWidth) > 0.01
             || Math.Abs(settings.IslandHeight - originalIslandHeight) > 0.01
             || Math.Abs(settings.IslandTopOffset - originalIslandTopOffset) > 0.01;

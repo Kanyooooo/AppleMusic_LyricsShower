@@ -9,6 +9,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <PlatformTarget>x64</PlatformTarget>
+    <ApplicationIcon>Assets\app-icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,6 +19,11 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.17" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app-icon.ico" />
+    <None Include="Assets\app-icon.jpg" CopyToOutputDirectory="Never" />
   </ItemGroup>
 
 </Project>

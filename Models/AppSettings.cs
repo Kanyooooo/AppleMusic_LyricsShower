@@ -40,6 +40,14 @@ public sealed class AppSettings
 
     public double WindowHeight { get; set; } = 360;
 
+    public double LyricsOnlyWidth { get; set; } = 860;
+
+    public double LyricsOnlyHeight { get; set; } = 220;
+
+    public double LyricsOnlyLeft { get; set; } = double.NaN;
+
+    public double LyricsOnlyTop { get; set; } = double.NaN;
+
     public double IslandWidth { get; set; } = 620;
 
     public double IslandHeight { get; set; } = 86;
@@ -51,6 +59,10 @@ public sealed class AppSettings
     public double IslandLeft { get; set; } = double.NaN;
 
     public double IslandTop { get; set; } = double.NaN;
+
+    public bool LockLyricsPosition { get; set; } = true;
+
+    public bool EnableIslandBreathing { get; set; } = true;
 
     public string OriginalColor { get; set; } = "#D5FFFFFF";
 

@@ -6,6 +6,8 @@ using System.Windows.Media.Animation;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using System.Runtime.InteropServices;
+using System.IO;
+using System.Reflection;
 using AppleMusicTranslator.Models;
 using AppleMusicTranslator.Services;
 using Drawing = System.Drawing;
@@ -61,6 +63,7 @@ public partial class MainWindow : Window
     private double _lyricDragStartX;
     private double _lyricDragStartY;
     private bool _suppressWindowPlacementSave;
+    private DateTime _lastPlacementSaveUtc = DateTime.MinValue;
     private ScrollViewerOffsetAnimator? _verticalScrollAnimator;
 
     public MainWindow()
@@ -88,6 +91,8 @@ public partial class MainWindow : Window
     private TimeSpan LyricOffset => TimeSpan.FromMilliseconds(_settings.LyricOffsetMs);
 
     private bool IsIslandMode => _settings.LayoutMode == LyricsLayoutMode.Island;
+
+    private bool IsCompactLyricsMode => _settings.LyricsOnlyMode || IsIslandMode;
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
@@ -1055,13 +1060,21 @@ public partial class MainWindow : Window
 
         LyricContentTransform.X = _settings.LyricOffsetX;
         LyricContentTransform.Y = _settings.LyricOffsetY;
+        if (_settings.LockLyricsPosition)
+        {
+            LyricContentTransform.X = 0;
+            LyricContentTransform.Y = 0;
+        }
 
         ApplyLyricsViewVisibility();
 
-        var compactChrome = _settings.LyricsOnlyMode || IsIslandMode;
+        var compactChrome = IsCompactLyricsMode;
         var showChrome = !compactChrome || SettingsPanel.Visibility == Visibility.Visible;
         HeaderGrid.Visibility = showChrome ? Visibility.Visible : Visibility.Collapsed;
         FooterGrid.Visibility = showChrome ? Visibility.Visible : Visibility.Collapsed;
+        CornerSettingsButton.Visibility = compactChrome && SettingsPanel.Visibility != Visibility.Visible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         SettingsPanel.Visibility = compactChrome && !IsActive
             ? Visibility.Collapsed
             : SettingsPanel.Visibility;
@@ -1092,6 +1105,7 @@ public partial class MainWindow : Window
         TrackText.Text = _latestTrack.HasSongIdentity ? _ui.TrackDisplay(_latestTrack.Title, _latestTrack.Artist) : _ui.WaitingForAppleMusicTitle;
         SettingsButton.Content = _ui.Settings;
         SettingsButton.ToolTip = _ui.SettingsTooltip;
+        CornerSettingsButton.ToolTip = _ui.SettingsTooltip;
         SettingsPanelTitle.Text = _ui.DisplaySettings;
         ShowTranslationCheckBox.Content = _ui.ShowTranslation;
         LyricsOnlyCheckBox.Content = _ui.LyricsOnlyWindow;
@@ -1127,6 +1141,9 @@ public partial class MainWindow : Window
         ContextTranslationMenuItem.Header = _settings.ShowTranslation ? _ui.ToggleTranslationOn : _ui.ToggleTranslationOff;
         ContextLyricsOnlyMenuItem.Header = _ui.LyricsOnlyMode;
         ContextExitMenuItem.Header = _ui.Exit;
+        CornerSettingsMenuItem.Header = _ui.Settings;
+        CornerRescanMenuItem.Header = _ui.RescanLyrics;
+        CornerTranslationMenuItem.Header = _settings.ShowTranslation ? _ui.ToggleTranslationOn : _ui.ToggleTranslationOff;
 
         foreach (var item in InterfaceLanguageComboBox.Items.OfType<ComboBoxItem>())
         {
@@ -1160,18 +1177,26 @@ public partial class MainWindow : Window
 
     private void RestoreWindowPlacement()
     {
-        if (!IsFinite(_settings.WindowWidth) || !IsFinite(_settings.WindowHeight))
+        var restoringLyricsOnly = _settings.LyricsOnlyMode
+            && IsFinite(_settings.LyricsOnlyWidth)
+            && IsFinite(_settings.LyricsOnlyHeight);
+        var width = restoringLyricsOnly ? _settings.LyricsOnlyWidth : _settings.WindowWidth;
+        var height = restoringLyricsOnly ? _settings.LyricsOnlyHeight : _settings.WindowHeight;
+        var left = restoringLyricsOnly ? _settings.LyricsOnlyLeft : _settings.WindowLeft;
+        var top = restoringLyricsOnly ? _settings.LyricsOnlyTop : _settings.WindowTop;
+
+        if (!IsFinite(width) || !IsFinite(height))
         {
             return;
         }
 
-        Width = Math.Clamp(_settings.WindowWidth, MinWidth, 2200);
-        Height = Math.Clamp(_settings.WindowHeight, MinHeight, 1400);
-        if (IsFinite(_settings.WindowLeft) && IsFinite(_settings.WindowTop))
+        Width = Math.Clamp(width, MinWidth, 2200);
+        Height = Math.Clamp(height, MinHeight, 1400);
+        if (IsFinite(left) && IsFinite(top))
         {
             WindowStartupLocation = WindowStartupLocation.Manual;
-            Left = _settings.WindowLeft;
-            Top = _settings.WindowTop;
+            Left = left;
+            Top = top;
         }
     }
 
@@ -1180,16 +1205,43 @@ public partial class MainWindow : Window
         if (IsIslandMode)
         {
             ApplyIslandPlacement();
+            PulseIsland();
             return;
         }
 
-        ResizeMode = ResizeMode.CanResizeWithGrip;
-        MinWidth = 520;
-        MinHeight = 180;
+        ResizeMode = _settings.LyricsOnlyMode ? ResizeMode.NoResize : ResizeMode.CanResizeWithGrip;
+        MinWidth = _settings.LyricsOnlyMode ? 360 : 520;
+        MinHeight = _settings.LyricsOnlyMode ? 120 : 180;
+        if (_settings.LyricsOnlyMode)
+        {
+            ApplyLyricsOnlyPlacement();
+            return;
+        }
+
         if (SettingsPanel.Visibility == Visibility.Visible)
         {
             Width = Math.Max(Width, 760);
             Height = Math.Max(Height, 360);
+        }
+    }
+
+    private void ApplyLyricsOnlyPlacement()
+    {
+        _suppressWindowPlacementSave = true;
+        try
+        {
+            Width = Math.Clamp(_settings.LyricsOnlyWidth, 360, 2200);
+            Height = Math.Clamp(_settings.LyricsOnlyHeight, 120, 900);
+            if (IsFinite(_settings.LyricsOnlyLeft) && IsFinite(_settings.LyricsOnlyTop))
+            {
+                var workArea = SystemParameters.WorkArea;
+                Left = Math.Clamp(_settings.LyricsOnlyLeft, workArea.Left, Math.Max(workArea.Left, workArea.Right - Width));
+                Top = Math.Clamp(_settings.LyricsOnlyTop, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - Height));
+            }
+        }
+        finally
+        {
+            _suppressWindowPlacementSave = false;
         }
     }
 
@@ -1199,16 +1251,19 @@ public partial class MainWindow : Window
         MinWidth = 360;
         MinHeight = 68;
 
-        var targetWidth = Math.Clamp(_settings.IslandWidth, 360, 1200);
-        var targetHeight = Math.Clamp(_settings.IslandHeight, 68, 180);
+        var hasTranslation = _settings.ShowTranslation && !string.IsNullOrWhiteSpace(IslandOriginalText.Text);
+        var activeTextLength = Math.Max(IslandMainLyricText.Text?.Length ?? 0, IslandOriginalText.Text?.Length ?? 0);
+        var dynamicWidth = _settings.IslandWidth + Math.Clamp(activeTextLength * 5.0, 0, 220);
+        var dynamicHeight = _settings.IslandHeight + (hasTranslation ? 18 : 0);
+        var targetWidth = Math.Clamp(dynamicWidth, 360, Math.Min(1200, SystemParameters.WorkArea.Width - 48));
+        var targetHeight = Math.Clamp(dynamicHeight, 68, 180);
 
         _suppressWindowPlacementSave = true;
         try
         {
-            Width = targetWidth;
-            Height = SettingsPanel.Visibility == Visibility.Visible
+            AnimateWindowSize(targetWidth, SettingsPanel.Visibility == Visibility.Visible
                 ? Math.Max(360, targetHeight + 260)
-                : targetHeight;
+                : targetHeight);
 
             var workArea = SystemParameters.WorkArea;
             if (_settings.IslandSnapToTop || Top <= workArea.Top + 80)
@@ -1232,8 +1287,55 @@ public partial class MainWindow : Window
             _suppressWindowPlacementSave = false;
         }
 
-        _settings.IslandWidth = targetWidth;
-        _settings.IslandHeight = targetHeight;
+        _settings.IslandWidth = Math.Clamp(_settings.IslandWidth, 360, 1200);
+        _settings.IslandHeight = Math.Clamp(_settings.IslandHeight, 68, 180);
+    }
+
+    private void AnimateWindowSize(double width, double height)
+    {
+        if (!IsLoaded)
+        {
+            Width = width;
+            Height = height;
+            return;
+        }
+
+        BeginAnimation(WidthProperty, new DoubleAnimation
+        {
+            To = width,
+            Duration = TimeSpan.FromMilliseconds(260),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        }, HandoffBehavior.SnapshotAndReplace);
+
+        BeginAnimation(HeightProperty, new DoubleAnimation
+        {
+            To = height,
+            Duration = TimeSpan.FromMilliseconds(260),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        }, HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private void PulseIsland()
+    {
+        if (!_settings.EnableIslandBreathing || !IsIslandMode || ShellScaleTransform is null)
+        {
+            return;
+        }
+
+        ShellScaleTransform.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation
+        {
+            From = 0.985,
+            To = 1,
+            Duration = TimeSpan.FromMilliseconds(220),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        }, HandoffBehavior.SnapshotAndReplace);
+        ShellScaleTransform.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation
+        {
+            From = 0.965,
+            To = 1,
+            Duration = TimeSpan.FromMilliseconds(220),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        }, HandoffBehavior.SnapshotAndReplace);
     }
 
     private void RememberWindowPlacement()
@@ -1248,11 +1350,33 @@ public partial class MainWindow : Window
             return;
         }
 
-        _settings.WindowLeft = Left;
-        _settings.WindowTop = Top;
-        _settings.WindowWidth = Math.Clamp(Width, 520, 2200);
-        _settings.WindowHeight = Math.Clamp(Height, 180, 1400);
+        if (_settings.LyricsOnlyMode)
+        {
+            _settings.LyricsOnlyLeft = Left;
+            _settings.LyricsOnlyTop = Top;
+            _settings.LyricsOnlyWidth = Math.Clamp(Width, 360, 2200);
+            _settings.LyricsOnlyHeight = Math.Clamp(Height, 120, 900);
+        }
+        else
+        {
+            _settings.WindowLeft = Left;
+            _settings.WindowTop = Top;
+            _settings.WindowWidth = Math.Clamp(Width, 520, 2200);
+            _settings.WindowHeight = Math.Clamp(Height, 180, 1400);
+        }
+
         _settingsService.Save(_settings);
+    }
+
+    private void RememberWindowPlacementThrottled()
+    {
+        if (DateTime.UtcNow - _lastPlacementSaveUtc < TimeSpan.FromMilliseconds(600))
+        {
+            return;
+        }
+
+        _lastPlacementSaveUtc = DateTime.UtcNow;
+        RememberWindowPlacement();
     }
 
     private static bool IsFinite(double value) =>
@@ -1412,6 +1536,26 @@ public partial class MainWindow : Window
         }
     }
 
+    private void Window_LocationChanged(object? sender, EventArgs e)
+    {
+        if (IsIslandMode)
+        {
+            return;
+        }
+
+        RememberWindowPlacementThrottled();
+    }
+
+    private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (IsIslandMode)
+        {
+            return;
+        }
+
+        RememberWindowPlacementThrottled();
+    }
+
     private void WrongLyricsButton_Click(object sender, RoutedEventArgs e)
     {
         if (!_latestTrack.HasSongIdentity)
@@ -1445,6 +1589,16 @@ public partial class MainWindow : Window
     private void SettingsMenuItem_Click(object sender, RoutedEventArgs e) => ToggleSettingsPanel();
 
     private void CloseMenuItem_Click(object sender, RoutedEventArgs e) => ExitApplication();
+
+    private void CornerSettingsButton_ContextMenuOpening(object sender, ContextMenuEventArgs e) => ApplyLocalizedText();
+
+    private void CornerRescanMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (_latestTrack.HasSongIdentity)
+        {
+            BeginLoadLyrics(_latestTrack, forceReload: true);
+        }
+    }
 
     private void ToggleTranslationMenuItem_Click(object sender, RoutedEventArgs e)
     {
@@ -1783,6 +1937,11 @@ public partial class MainWindow : Window
 
     private void Shell_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (_settings.LockLyricsPosition && IsWithinElement(e.OriginalSource, LyricGrid))
+        {
+            return;
+        }
+
         if (e.ButtonState == MouseButtonState.Pressed)
         {
             DragMove();
@@ -1797,8 +1956,34 @@ public partial class MainWindow : Window
         }
     }
 
+    private static bool IsWithinElement(object source, DependencyObject element)
+    {
+        if (source is not DependencyObject current)
+        {
+            return false;
+        }
+
+        while (current is not null)
+        {
+            if (ReferenceEquals(current, element))
+            {
+                return true;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
+    }
+
     private void LyricGrid_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (_settings.LockLyricsPosition)
+        {
+            e.Handled = false;
+            return;
+        }
+
         if (SettingsPanel.Visibility == Visibility.Visible)
         {
             return;
@@ -2006,12 +2191,36 @@ public partial class MainWindow : Window
         var tray = new Forms.NotifyIcon
         {
             Text = _ui.WindowTitle,
-            Icon = Drawing.SystemIcons.Application,
+            Icon = LoadAppIcon(),
             ContextMenuStrip = _trayMenu
         };
         tray.DoubleClick += (_, _) => Dispatcher.Invoke(ShowWindowAndBringFront);
         UpdateTrayMenuText();
         return tray;
+    }
+
+    private static Drawing.Icon LoadAppIcon()
+    {
+        try
+        {
+            var assembly = Assembly.GetExecutingAssembly();
+            var resourceName = assembly.GetManifestResourceNames()
+                .FirstOrDefault(name => name.EndsWith("app-icon.ico", StringComparison.OrdinalIgnoreCase));
+            if (resourceName is not null)
+            {
+                using var stream = assembly.GetManifestResourceStream(resourceName);
+                if (stream is not null)
+                {
+                    return new Drawing.Icon(stream);
+                }
+            }
+        }
+        catch
+        {
+            // Fallback to the system icon if the embedded icon cannot be loaded.
+        }
+
+        return Drawing.SystemIcons.Application;
     }
 
     private void UpdateTrayMenuText()

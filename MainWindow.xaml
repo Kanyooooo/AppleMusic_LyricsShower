@@ -1,4 +1,4 @@
-<Window x:Class="AppleMusicTranslator.MainWindow"
+﻿<Window x:Class="AppleMusicTranslator.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Apple Music Translator"
@@ -14,6 +14,8 @@
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
         Loaded="Window_Loaded"
+        LocationChanged="Window_LocationChanged"
+        SizeChanged="Window_SizeChanged"
         Closing="Window_Closing">
     <Window.ContextMenu>
         <ContextMenu>
@@ -61,6 +63,8 @@
             <Setter Property="Margin" Value="0,0,6,0" />
             <Setter Property="Content" Value="" />
         </Style>
+
+        <CubicEase x:Key="SoftEaseOut" EasingMode="EaseOut" />
     </Window.Resources>
 
     <Border x:Name="Shell"
@@ -70,7 +74,11 @@
             BorderBrush="#665DFFE6"
             BorderThickness="1"
             CornerRadius="8"
+            RenderTransformOrigin="0.5,0.5"
             MouseLeftButtonDown="Shell_MouseLeftButtonDown">
+        <Border.RenderTransform>
+            <ScaleTransform x:Name="ShellScaleTransform" ScaleX="1" ScaleY="1" />
+        </Border.RenderTransform>
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -131,7 +139,7 @@
                             Height="30"
                             Margin="0,0,8,0"
                             Click="RefreshButton_Click"
-                            Content="↻"
+                            Content="R"
                             Style="{StaticResource ToolButtonStyle}"
                             ToolTip="Rescan lyrics" />
                     <Button x:Name="MinimizeButton"
@@ -139,7 +147,7 @@
                             Height="30"
                             Margin="0,0,8,0"
                             Click="MinimizeButton_Click"
-                            Content="—"
+                            Content="_"
                             Style="{StaticResource ToolButtonStyle}"
                             ToolTip="Minimize" />
                     <Button x:Name="CloseButton"
@@ -155,14 +163,15 @@
             <Grid x:Name="LyricGrid"
                   Grid.Row="1"
                   Margin="0,18,0,12"
-                  MouseLeftButtonDown="LyricGrid_MouseLeftButtonDown"
-                  MouseLeftButtonUp="LyricGrid_MouseLeftButtonUp"
-                  MouseMove="LyricGrid_MouseMove">
+                  HorizontalAlignment="Stretch"
+                  VerticalAlignment="Stretch">
                 <Grid.RenderTransform>
                     <TranslateTransform x:Name="LyricContentTransform" />
                 </Grid.RenderTransform>
 
-                <Grid x:Name="CenterLyricsView">
+                <Grid x:Name="CenterLyricsView"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Center">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
@@ -189,6 +198,8 @@
                 </Grid>
 
                 <Grid x:Name="IslandLyricsView"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Center"
                       Visibility="Collapsed">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="6" />
@@ -226,6 +237,8 @@
                 </Grid>
 
                 <ScrollViewer x:Name="VerticalLyricsView"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
                               VerticalScrollBarVisibility="Hidden"
                               HorizontalScrollBarVisibility="Disabled"
                               Visibility="Collapsed">
@@ -456,6 +469,29 @@
                     </StackPanel>
                 </ScrollViewer>
             </Border>
+
+            <Button x:Name="CornerSettingsButton"
+                    Grid.RowSpan="3"
+                    Width="34"
+                    Height="34"
+                    Margin="0,0,4,4"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Bottom"
+                    Click="SettingsButton_Click"
+                    Content="..."
+                    ContextMenuOpening="CornerSettingsButton_ContextMenuOpening"
+                    Style="{StaticResource ToolButtonStyle}"
+                    ToolTip="Settings"
+                    Visibility="Collapsed">
+                <Button.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem x:Name="CornerSettingsMenuItem" Header="Settings" Click="SettingsMenuItem_Click" />
+                        <MenuItem x:Name="CornerRescanMenuItem" Header="Rescan lyrics" Click="CornerRescanMenuItem_Click" />
+                        <MenuItem x:Name="CornerTranslationMenuItem" Header="Toggle translation" Click="ToggleTranslationMenuItem_Click" />
+                    </ContextMenu>
+                </Button.ContextMenu>
+            </Button>
         </Grid>
     </Border>
 </Window>
+

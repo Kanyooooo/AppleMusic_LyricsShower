@@ -40,7 +40,7 @@ public sealed class UiText
     public string WrongLyricsTooltip => Language == UiLanguage.English ? "Not this song: delete cached lyrics and rescan" : "不是这首歌：删除缓存并重新扫描";
     public string LyricsConflictTooltip(string conflict) => Language == UiLanguage.English
         ? $"Possible lyric cache conflict with {conflict}. Click if this is not this song."
-        : $"歌词缓存可能和 {conflict} 冲突。若不是这首歌，请点击。";
+        : $"歌词缓存可能和 {conflict} 冲突。若不是这首歌，请点击删除缓存。";
     public string ReadyTranslatedLines(int count) => Language == UiLanguage.English ? $"Ready: {count} translated lines" : $"翻译就绪：{count} 行";
     public string TranslatingInBackground(int done, int total) => Language == UiLanguage.English ? $"Translating in background {done}/{total}" : $"后台翻译中 {done}/{total}";
     public string ReadVisibleAnchors(int count) => Language == UiLanguage.English ? $"Read {count} visible lyric anchors" : $"已读取 {count} 个可见歌词锚点";
@@ -57,6 +57,9 @@ public sealed class UiText
     public string ShowTranslation => Language == UiLanguage.English ? "Show translation" : "显示翻译";
     public string LyricsOnlyWindow => Language == UiLanguage.English ? "Lyrics-only window" : "仅歌词窗口";
     public string VerticalLyrics => Language == UiLanguage.English ? "Vertical lyrics" : "竖向歌词";
+    public string DynamicIsland => Language == UiLanguage.English ? "Dynamic island" : "灵动岛模式";
+    public string AutoScrollLongLyrics => Language == UiLanguage.English ? "Auto scroll long lyrics" : "长歌词自动滚动";
+    public string AutoCenterCurrentLyric => Language == UiLanguage.English ? "Center current lyric" : "当前歌词自动居中";
     public string AutoOpenLyricsPanel => Language == UiLanguage.English ? "Auto open Apple Music lyrics" : "自动打开 Apple Music 歌词";
     public string AutoContrastText => Language == UiLanguage.English ? "Auto contrast text" : "自动调整文字对比度";
     public string InterfaceLanguage => Language == UiLanguage.English ? "Interface language" : "界面语言";
@@ -69,6 +72,9 @@ public sealed class UiText
     public string BackgroundOpacity => Language == UiLanguage.English ? "Background opacity" : "背景透明度";
     public string LyricPositionX => Language == UiLanguage.English ? "Lyric horizontal position" : "歌词横向位置";
     public string LyricPositionY => Language == UiLanguage.English ? "Lyric vertical position" : "歌词纵向位置";
+    public string IslandWidth => Language == UiLanguage.English ? "Island width" : "灵动岛宽度";
+    public string IslandHeight => Language == UiLanguage.English ? "Island height" : "灵动岛高度";
+    public string IslandTopOffset => Language == UiLanguage.English ? "Island top offset" : "灵动岛顶部间距";
     public string MainColor => Language == UiLanguage.English ? "Main color" : "主歌词颜色";
     public string OriginalColor => Language == UiLanguage.English ? "Original color" : "原文颜色";
     public string BackgroundColor => Language == UiLanguage.English ? "Background color" : "背景颜色";
@@ -81,6 +87,7 @@ public sealed class UiText
     public string TrackDisplay(string title, string artist) => $"{title} - {artist}";
     public string LyricOffsetValue(int value) => Language == UiLanguage.English ? $"{value} ms early" : $"提前 {value} 毫秒";
     public string LyricPositionValue(double value) => Language == UiLanguage.English ? $"{value:0}px" : $"{value:0} 像素";
+    public string PixelValue(double value) => Language == UiLanguage.English ? $"{value:0}px" : $"{value:0} 像素";
 
     public string SourceFor(string source)
     {

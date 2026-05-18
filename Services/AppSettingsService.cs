@@ -88,6 +88,36 @@ public sealed class AppSettingsService
             changed = true;
         }
 
+        if (!rawJson.Contains(nameof(AppSettings.AutoScrollLongLyrics), StringComparison.Ordinal))
+        {
+            settings.AutoScrollLongLyrics = true;
+            changed = true;
+        }
+
+        if (!rawJson.Contains(nameof(AppSettings.AutoCenterCurrentLyric), StringComparison.Ordinal))
+        {
+            settings.AutoCenterCurrentLyric = true;
+            changed = true;
+        }
+
+        if (!rawJson.Contains(nameof(AppSettings.WindowWidth), StringComparison.Ordinal))
+        {
+            settings.WindowWidth = new AppSettings().WindowWidth;
+            settings.WindowHeight = new AppSettings().WindowHeight;
+            changed = true;
+        }
+
+        if (!rawJson.Contains(nameof(AppSettings.IslandWidth), StringComparison.Ordinal))
+        {
+            settings.IslandWidth = new AppSettings().IslandWidth;
+            settings.IslandHeight = new AppSettings().IslandHeight;
+            settings.IslandTopOffset = new AppSettings().IslandTopOffset;
+            settings.IslandSnapToTop = true;
+            settings.IslandLeft = double.NaN;
+            settings.IslandTop = double.NaN;
+            changed = true;
+        }
+
         if (!rawJson.Contains(nameof(AppSettings.BackgroundColor), StringComparison.Ordinal))
         {
             settings.BackgroundColor = new AppSettings().BackgroundColor;
@@ -102,9 +132,25 @@ public sealed class AppSettingsService
         settings.LyricOffsetX = Math.Clamp(settings.LyricOffsetX, -360, 360);
         settings.LyricOffsetY = Math.Clamp(settings.LyricOffsetY, -180, 180);
 
+        var originalWindowWidth = settings.WindowWidth;
+        var originalWindowHeight = settings.WindowHeight;
+        var originalIslandWidth = settings.IslandWidth;
+        var originalIslandHeight = settings.IslandHeight;
+        var originalIslandTopOffset = settings.IslandTopOffset;
+        settings.WindowWidth = Math.Clamp(settings.WindowWidth, 520, 2200);
+        settings.WindowHeight = Math.Clamp(settings.WindowHeight, 180, 1400);
+        settings.IslandWidth = Math.Clamp(settings.IslandWidth, 360, 1200);
+        settings.IslandHeight = Math.Clamp(settings.IslandHeight, 68, 180);
+        settings.IslandTopOffset = Math.Clamp(settings.IslandTopOffset, 0, 120);
+
         return changed
             || settings.LyricOffsetMs != originalOffset
             || Math.Abs(settings.LyricOffsetX - originalX) > 0.01
-            || Math.Abs(settings.LyricOffsetY - originalY) > 0.01;
+            || Math.Abs(settings.LyricOffsetY - originalY) > 0.01
+            || Math.Abs(settings.WindowWidth - originalWindowWidth) > 0.01
+            || Math.Abs(settings.WindowHeight - originalWindowHeight) > 0.01
+            || Math.Abs(settings.IslandWidth - originalIslandWidth) > 0.01
+            || Math.Abs(settings.IslandHeight - originalIslandHeight) > 0.01
+            || Math.Abs(settings.IslandTopOffset - originalIslandTopOffset) > 0.01;
     }
 }

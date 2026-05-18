@@ -60,15 +60,19 @@ public partial class MainWindow : Window
     private WpfPoint _lyricDragStart;
     private double _lyricDragStartX;
     private double _lyricDragStartY;
+    private bool _suppressWindowPlacementSave;
+    private ScrollViewerOffsetAnimator? _verticalScrollAnimator;
 
     public MainWindow()
     {
         InitializeComponent();
+        _verticalScrollAnimator = new ScrollViewerOffsetAnimator(VerticalLyricsView);
 
         _settings = _settingsService.Load();
         _ui = UiText.For(_settings.InterfaceLanguage);
         ApplyLocalizedText();
         ApplySettingsToControls();
+        RestoreWindowPlacement();
         ApplySettings();
 
         _timer = new DispatcherTimer
@@ -82,6 +86,8 @@ public partial class MainWindow : Window
     }
 
     private TimeSpan LyricOffset => TimeSpan.FromMilliseconds(_settings.LyricOffsetMs);
+
+    private bool IsIslandMode => _settings.LayoutMode == LyricsLayoutMode.Island;
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
@@ -160,8 +166,7 @@ public partial class MainWindow : Window
         _usingCachedLyrics = false;
         SetLyricsCacheConflict(false, string.Empty);
         VerticalLyricsPanel.Children.Clear();
-        CenterLyricsView.Visibility = Visibility.Visible;
-        VerticalLyricsView.Visibility = Visibility.Collapsed;
+        ApplyLyricsViewVisibility();
 
         var hasCachedLyrics = TryApplyCachedLyrics(track);
         if (!hasCachedLyrics)
@@ -754,7 +759,7 @@ public partial class MainWindow : Window
         var translated = line is null ? string.Empty : GetTranslation(line.Text);
         var displayKey = line is null
             ? string.Empty
-            : $"{line.Begin.TotalMilliseconds:0}:{line.Text}:{translated}:{_settings.ShowTranslation}:{_settings.LyricsOnlyMode}:{_settings.LayoutMode}";
+            : $"{line.Begin.TotalMilliseconds:0}:{line.Text}:{translated}:{_settings.ShowTranslation}:{_settings.LyricsOnlyMode}:{_settings.LayoutMode}:{_settings.AutoCenterCurrentLyric}:{_settings.AutoScrollLongLyrics}";
 
         if (!force && displayKey == _lastDisplayedLine)
         {
@@ -780,6 +785,25 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_settings.LayoutMode == LyricsLayoutMode.Island)
+        {
+            if (!_settings.ShowTranslation)
+            {
+                SetIslandLyricText(string.Empty, line.Text);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(translated))
+            {
+                SetIslandLyricText(string.Empty, line.Text);
+                RequestCurrentLineTranslation(line);
+                return;
+            }
+
+            SetIslandLyricText(line.Text, translated);
+            return;
+        }
+
         if (!_settings.ShowTranslation)
         {
             SetLyricText(string.Empty, line.Text);
@@ -798,8 +822,7 @@ public partial class MainWindow : Window
 
     private void UpdateVerticalLyrics(LyricLine activeLine)
     {
-        CenterLyricsView.Visibility = Visibility.Collapsed;
-        VerticalLyricsView.Visibility = Visibility.Visible;
+        ApplyLyricsViewVisibility();
         VerticalLyricsPanel.Children.Clear();
 
         var background = ColorFromHex(_settings.BackgroundColor, WpfColor.FromRgb(24, 27, 34));
@@ -867,6 +890,11 @@ public partial class MainWindow : Window
 
         Dispatcher.BeginInvoke(() =>
         {
+            if (!_settings.AutoScrollLongLyrics)
+            {
+                return;
+            }
+
             VerticalLyricsView.UpdateLayout();
             if (activeIndex >= VerticalLyricsPanel.Children.Count
                 || VerticalLyricsPanel.Children[activeIndex] is not FrameworkElement activeElement)
@@ -875,8 +903,9 @@ public partial class MainWindow : Window
             }
 
             var point = activeElement.TranslatePoint(new WpfPoint(0, 0), VerticalLyricsPanel);
-            var target = Math.Max(0, point.Y - Math.Max(40, VerticalLyricsView.ViewportHeight * 0.35));
-            VerticalLyricsView.ScrollToVerticalOffset(target);
+            var anchor = _settings.AutoCenterCurrentLyric ? 0.5 : 0.35;
+            var target = Math.Max(0, point.Y - Math.Max(40, VerticalLyricsView.ViewportHeight * anchor));
+            AnimateVerticalScroll(target);
         }, DispatcherPriority.Background);
     }
 
@@ -899,6 +928,22 @@ public partial class MainWindow : Window
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 2, 0, 2)
         };
+    }
+
+    private void AnimateVerticalScroll(double target)
+    {
+        _verticalScrollAnimator ??= new ScrollViewerOffsetAnimator(VerticalLyricsView);
+        var maximum = Math.Max(0, VerticalLyricsView.ExtentHeight - VerticalLyricsView.ViewportHeight);
+        _verticalScrollAnimator.Offset = VerticalLyricsView.VerticalOffset;
+        _verticalScrollAnimator.BeginAnimation(
+            ScrollViewerOffsetAnimator.OffsetProperty,
+            new DoubleAnimation
+            {
+                To = Math.Clamp(target, 0, maximum),
+                Duration = TimeSpan.FromMilliseconds(260),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            },
+            HandoffBehavior.SnapshotAndReplace);
     }
 
     private string GetTranslation(string text)
@@ -932,8 +977,7 @@ public partial class MainWindow : Window
 
         SetLyricText(string.Empty, message, animate: false);
         VerticalLyricsPanel.Children.Clear();
-        CenterLyricsView.Visibility = Visibility.Visible;
-        VerticalLyricsView.Visibility = Visibility.Collapsed;
+        ApplyLyricsViewVisibility();
         SourceText.Text = _ui.AppleMusicMemorySource;
         SongProgress.Maximum = 1;
         SongProgress.Value = 0;
@@ -947,6 +991,9 @@ public partial class MainWindow : Window
             ShowTranslationCheckBox.IsChecked = _settings.ShowTranslation;
             LyricsOnlyCheckBox.IsChecked = _settings.LyricsOnlyMode;
             VerticalLyricsCheckBox.IsChecked = _settings.LayoutMode == LyricsLayoutMode.Vertical;
+            IslandModeCheckBox.IsChecked = _settings.LayoutMode == LyricsLayoutMode.Island;
+            AutoScrollLongLyricsCheckBox.IsChecked = _settings.AutoScrollLongLyrics;
+            AutoCenterCurrentLyricCheckBox.IsChecked = _settings.AutoCenterCurrentLyric;
             AutoLyricsPanelCheckBox.IsChecked = _settings.AutoOpenAppleMusicLyricsPanel;
             AutoContrastCheckBox.IsChecked = _settings.AutoContrastText;
             MainFontSlider.Value = _settings.MainFontSize;
@@ -955,6 +1002,9 @@ public partial class MainWindow : Window
             LyricOffsetSlider.Value = _settings.LyricOffsetMs;
             LyricPositionXSlider.Value = _settings.LyricOffsetX;
             LyricPositionYSlider.Value = _settings.LyricOffsetY;
+            IslandWidthSlider.Value = _settings.IslandWidth;
+            IslandHeightSlider.Value = _settings.IslandHeight;
+            IslandTopOffsetSlider.Value = _settings.IslandTopOffset;
             SelectLanguageComboItem();
         }
         finally
@@ -995,26 +1045,32 @@ public partial class MainWindow : Window
         MainLyricText.FontSize = _settings.MainFontSize;
         MainLyricText.LineHeight = Math.Max(_settings.MainFontSize * 1.24, _settings.MainFontSize + 4);
         OriginalText.FontSize = _settings.OriginalFontSize;
+        IslandMainLyricText.FontSize = Math.Clamp(_settings.MainFontSize * 0.72, 18, 32);
+        IslandOriginalText.FontSize = Math.Clamp(_settings.OriginalFontSize * 0.78, 11, 18);
         MainLyricText.Foreground = new SolidColorBrush(mainColor);
         OriginalText.Foreground = new SolidColorBrush(originalColor);
+        IslandMainLyricText.Foreground = new SolidColorBrush(mainColor);
+        IslandOriginalText.Foreground = new SolidColorBrush(originalColor);
+        IslandAccentBar.Background = new SolidColorBrush(ColorFromHex(_settings.AccentColor, WpfColor.FromRgb(93, 255, 230)));
 
         LyricContentTransform.X = _settings.LyricOffsetX;
         LyricContentTransform.Y = _settings.LyricOffsetY;
 
-        CenterLyricsView.Visibility = _settings.LayoutMode == LyricsLayoutMode.Center ? Visibility.Visible : Visibility.Collapsed;
-        VerticalLyricsView.Visibility = _settings.LayoutMode == LyricsLayoutMode.Vertical ? Visibility.Visible : Visibility.Collapsed;
+        ApplyLyricsViewVisibility();
 
-        HeaderGrid.Visibility = _settings.LyricsOnlyMode ? Visibility.Collapsed : Visibility.Visible;
-        FooterGrid.Visibility = _settings.LyricsOnlyMode ? Visibility.Collapsed : Visibility.Visible;
-        SettingsPanel.Visibility = _settings.LyricsOnlyMode && !IsActive
+        var compactChrome = _settings.LyricsOnlyMode || IsIslandMode;
+        var showChrome = !compactChrome || SettingsPanel.Visibility == Visibility.Visible;
+        HeaderGrid.Visibility = showChrome ? Visibility.Visible : Visibility.Collapsed;
+        FooterGrid.Visibility = showChrome ? Visibility.Visible : Visibility.Collapsed;
+        SettingsPanel.Visibility = compactChrome && !IsActive
             ? Visibility.Collapsed
             : SettingsPanel.Visibility;
 
-        Shell.Padding = _settings.LyricsOnlyMode ? new Thickness(8) : new Thickness(18);
-        Shell.Margin = _settings.LyricsOnlyMode ? new Thickness(0) : new Thickness(12);
-        Shell.BorderThickness = _settings.LyricsOnlyMode ? new Thickness(0) : new Thickness(1);
-        Shell.CornerRadius = _settings.LyricsOnlyMode ? new CornerRadius(0) : new CornerRadius(8);
-        Shell.Background = _settings.LyricsOnlyMode
+        Shell.Padding = IsIslandMode ? new Thickness(16, 10, 18, 10) : _settings.LyricsOnlyMode ? new Thickness(8) : new Thickness(18);
+        Shell.Margin = IsIslandMode ? new Thickness(0) : _settings.LyricsOnlyMode ? new Thickness(0) : new Thickness(12);
+        Shell.BorderThickness = _settings.LyricsOnlyMode && !IsIslandMode ? new Thickness(0) : new Thickness(1);
+        Shell.CornerRadius = IsIslandMode ? new CornerRadius(Math.Max(28, _settings.IslandHeight / 2)) : _settings.LyricsOnlyMode ? new CornerRadius(0) : new CornerRadius(8);
+        Shell.Background = _settings.LyricsOnlyMode && !IsIslandMode
             ? WpfBrushes.Transparent
             : new SolidColorBrush(WpfColor.FromArgb(
                 (byte)Math.Clamp(_settings.BackgroundOpacity * 255, 0, 255),
@@ -1024,7 +1080,8 @@ public partial class MainWindow : Window
         Shell.BorderBrush = BrushFromHex(WithAlpha(_settings.AccentColor, _settings.BorderOpacity), System.Windows.Media.Colors.Cyan);
         SettingsPanel.BorderBrush = Shell.BorderBrush;
 
-        LyricGrid.Margin = _settings.LyricsOnlyMode ? new Thickness(0) : new Thickness(0, 18, 0, 12);
+        LyricGrid.Margin = IsIslandMode ? new Thickness(0) : _settings.LyricsOnlyMode ? new Thickness(0) : new Thickness(0, 18, 0, 12);
+        ApplyWindowModePlacement();
         EnforceTopmost();
         UpdateCurrentLyric(_latestTrack, force: true);
     }
@@ -1039,6 +1096,9 @@ public partial class MainWindow : Window
         ShowTranslationCheckBox.Content = _ui.ShowTranslation;
         LyricsOnlyCheckBox.Content = _ui.LyricsOnlyWindow;
         VerticalLyricsCheckBox.Content = _ui.VerticalLyrics;
+        IslandModeCheckBox.Content = _ui.DynamicIsland;
+        AutoScrollLongLyricsCheckBox.Content = _ui.AutoScrollLongLyrics;
+        AutoCenterCurrentLyricCheckBox.Content = _ui.AutoCenterCurrentLyric;
         AutoLyricsPanelCheckBox.Content = _ui.AutoOpenLyricsPanel;
         AutoContrastCheckBox.Content = _ui.AutoContrastText;
         InterfaceLanguageLabel.Text = _ui.InterfaceLanguage;
@@ -1049,6 +1109,9 @@ public partial class MainWindow : Window
         BackgroundOpacityLabel.Text = _ui.BackgroundOpacity;
         LyricPositionXLabel.Text = $"{_ui.LyricPositionX}: {_ui.LyricPositionValue(_settings.LyricOffsetX)}";
         LyricPositionYLabel.Text = $"{_ui.LyricPositionY}: {_ui.LyricPositionValue(_settings.LyricOffsetY)}";
+        IslandWidthLabel.Text = $"{_ui.IslandWidth}: {_ui.PixelValue(_settings.IslandWidth)}";
+        IslandHeightLabel.Text = $"{_ui.IslandHeight}: {_ui.PixelValue(_settings.IslandHeight)}";
+        IslandTopOffsetLabel.Text = $"{_ui.IslandTopOffset}: {_ui.PixelValue(_settings.IslandTopOffset)}";
         MainColorLabel.Text = _ui.MainColor;
         OriginalColorLabel.Text = _ui.OriginalColor;
         BackgroundColorLabel.Text = _ui.BackgroundColor;
@@ -1087,6 +1150,113 @@ public partial class MainWindow : Window
         _settingsService.Save(_settings);
         ApplySettings();
     }
+
+    private void ApplyLyricsViewVisibility()
+    {
+        CenterLyricsView.Visibility = _settings.LayoutMode == LyricsLayoutMode.Center ? Visibility.Visible : Visibility.Collapsed;
+        VerticalLyricsView.Visibility = _settings.LayoutMode == LyricsLayoutMode.Vertical ? Visibility.Visible : Visibility.Collapsed;
+        IslandLyricsView.Visibility = _settings.LayoutMode == LyricsLayoutMode.Island ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void RestoreWindowPlacement()
+    {
+        if (!IsFinite(_settings.WindowWidth) || !IsFinite(_settings.WindowHeight))
+        {
+            return;
+        }
+
+        Width = Math.Clamp(_settings.WindowWidth, MinWidth, 2200);
+        Height = Math.Clamp(_settings.WindowHeight, MinHeight, 1400);
+        if (IsFinite(_settings.WindowLeft) && IsFinite(_settings.WindowTop))
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Left = _settings.WindowLeft;
+            Top = _settings.WindowTop;
+        }
+    }
+
+    private void ApplyWindowModePlacement()
+    {
+        if (IsIslandMode)
+        {
+            ApplyIslandPlacement();
+            return;
+        }
+
+        ResizeMode = ResizeMode.CanResizeWithGrip;
+        MinWidth = 520;
+        MinHeight = 180;
+        if (SettingsPanel.Visibility == Visibility.Visible)
+        {
+            Width = Math.Max(Width, 760);
+            Height = Math.Max(Height, 360);
+        }
+    }
+
+    private void ApplyIslandPlacement()
+    {
+        ResizeMode = ResizeMode.NoResize;
+        MinWidth = 360;
+        MinHeight = 68;
+
+        var targetWidth = Math.Clamp(_settings.IslandWidth, 360, 1200);
+        var targetHeight = Math.Clamp(_settings.IslandHeight, 68, 180);
+
+        _suppressWindowPlacementSave = true;
+        try
+        {
+            Width = targetWidth;
+            Height = SettingsPanel.Visibility == Visibility.Visible
+                ? Math.Max(360, targetHeight + 260)
+                : targetHeight;
+
+            var workArea = SystemParameters.WorkArea;
+            if (_settings.IslandSnapToTop || Top <= workArea.Top + 80)
+            {
+                Left = workArea.Left + Math.Max(0, (workArea.Width - Width) / 2);
+                Top = workArea.Top + Math.Clamp(_settings.IslandTopOffset, 0, 120);
+            }
+            else if (IsFinite(_settings.IslandLeft) && IsFinite(_settings.IslandTop))
+            {
+                Left = Math.Clamp(_settings.IslandLeft, workArea.Left, Math.Max(workArea.Left, workArea.Right - Width));
+                Top = Math.Clamp(_settings.IslandTop, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - Height));
+            }
+            else
+            {
+                Left = Math.Clamp(Left, workArea.Left, Math.Max(workArea.Left, workArea.Right - Width));
+                Top = Math.Clamp(Top, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - Height));
+            }
+        }
+        finally
+        {
+            _suppressWindowPlacementSave = false;
+        }
+
+        _settings.IslandWidth = targetWidth;
+        _settings.IslandHeight = targetHeight;
+    }
+
+    private void RememberWindowPlacement()
+    {
+        if (_suppressWindowPlacementSave || IsIslandMode || WindowState != WindowState.Normal)
+        {
+            return;
+        }
+
+        if (!IsFinite(Left) || !IsFinite(Top) || !IsFinite(Width) || !IsFinite(Height))
+        {
+            return;
+        }
+
+        _settings.WindowLeft = Left;
+        _settings.WindowTop = Top;
+        _settings.WindowWidth = Math.Clamp(Width, 520, 2200);
+        _settings.WindowHeight = Math.Clamp(Height, 180, 1400);
+        _settingsService.Save(_settings);
+    }
+
+    private static bool IsFinite(double value) =>
+        !double.IsNaN(value) && !double.IsInfinity(value);
 
     private static SolidColorBrush BrushFromHex(string value, System.Windows.Media.Color fallback)
     {
@@ -1191,12 +1361,18 @@ public partial class MainWindow : Window
         SettingsPanel.Visibility = SettingsPanel.Visibility == Visibility.Visible
             ? Visibility.Collapsed
             : Visibility.Visible;
+        ApplySettings();
     }
 
     private void ShowWindowAndBringFront()
     {
         Show();
         WindowState = WindowState.Normal;
+        if (IsIslandMode)
+        {
+            ApplyIslandPlacement();
+        }
+
         Topmost = true;
         EnforceTopmost();
         Activate();
@@ -1256,7 +1432,11 @@ public partial class MainWindow : Window
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e) => ToggleSettingsPanel();
 
-    private void CloseSettingsButton_Click(object sender, RoutedEventArgs e) => SettingsPanel.Visibility = Visibility.Collapsed;
+    private void CloseSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        SettingsPanel.Visibility = Visibility.Collapsed;
+        ApplySettings();
+    }
 
     private void MinimizeButton_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
 
@@ -1276,6 +1456,7 @@ public partial class MainWindow : Window
         _settings.LyricsOnlyMode = !_settings.LyricsOnlyMode;
         ApplySettingsToControls();
         SaveAndApplySettings();
+        UpdateTrayMenuText();
     }
 
     private void ShowTranslationCheckBox_Changed(object sender, RoutedEventArgs e)
@@ -1299,6 +1480,7 @@ public partial class MainWindow : Window
 
         _settings.LyricsOnlyMode = LyricsOnlyCheckBox.IsChecked == true;
         SaveAndApplySettings();
+        UpdateTrayMenuText();
     }
 
     private void VerticalLyricsCheckBox_Changed(object sender, RoutedEventArgs e)
@@ -1311,6 +1493,52 @@ public partial class MainWindow : Window
         _settings.LayoutMode = VerticalLyricsCheckBox.IsChecked == true
             ? LyricsLayoutMode.Vertical
             : LyricsLayoutMode.Center;
+        ApplySettingsToControls();
+        SaveAndApplySettings();
+    }
+
+    private void IslandModeCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_applyingSettings)
+        {
+            return;
+        }
+
+        if (IslandModeCheckBox.IsChecked == true)
+        {
+            _settings.LayoutMode = LyricsLayoutMode.Island;
+            _settings.IslandSnapToTop = true;
+            _settings.IslandLeft = double.NaN;
+            _settings.IslandTop = double.NaN;
+        }
+        else if (_settings.LayoutMode == LyricsLayoutMode.Island)
+        {
+            _settings.LayoutMode = LyricsLayoutMode.Center;
+        }
+
+        ApplySettingsToControls();
+        SaveAndApplySettings();
+    }
+
+    private void AutoScrollLongLyricsCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_applyingSettings)
+        {
+            return;
+        }
+
+        _settings.AutoScrollLongLyrics = AutoScrollLongLyricsCheckBox.IsChecked == true;
+        SaveAndApplySettings();
+    }
+
+    private void AutoCenterCurrentLyricCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_applyingSettings)
+        {
+            return;
+        }
+
+        _settings.AutoCenterCurrentLyric = AutoCenterCurrentLyricCheckBox.IsChecked == true;
         SaveAndApplySettings();
     }
 
@@ -1419,6 +1647,43 @@ public partial class MainWindow : Window
         SaveAndApplySettings();
     }
 
+    private void IslandWidthSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_applyingSettings || _settings is null)
+        {
+            return;
+        }
+
+        _settings.IslandWidth = Math.Round(e.NewValue);
+        IslandWidthLabel.Text = $"{_ui.IslandWidth}: {_ui.PixelValue(_settings.IslandWidth)}";
+        SaveAndApplySettings();
+    }
+
+    private void IslandHeightSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_applyingSettings || _settings is null)
+        {
+            return;
+        }
+
+        _settings.IslandHeight = Math.Round(e.NewValue);
+        IslandHeightLabel.Text = $"{_ui.IslandHeight}: {_ui.PixelValue(_settings.IslandHeight)}";
+        SaveAndApplySettings();
+    }
+
+    private void IslandTopOffsetSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_applyingSettings || _settings is null)
+        {
+            return;
+        }
+
+        _settings.IslandTopOffset = Math.Round(e.NewValue);
+        _settings.IslandSnapToTop = true;
+        IslandTopOffsetLabel.Text = $"{_ui.IslandTopOffset}: {_ui.PixelValue(_settings.IslandTopOffset)}";
+        SaveAndApplySettings();
+    }
+
     private void MainColorButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is System.Windows.Controls.Button { Tag: string color })
@@ -1521,6 +1786,14 @@ public partial class MainWindow : Window
         if (e.ButtonState == MouseButtonState.Pressed)
         {
             DragMove();
+            if (IsIslandMode)
+            {
+                SnapIslandAfterMove();
+            }
+            else
+            {
+                RememberWindowPlacement();
+            }
         }
     }
 
@@ -1568,6 +1841,29 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private void SnapIslandAfterMove()
+    {
+        var workArea = SystemParameters.WorkArea;
+        if (Top <= workArea.Top + 80)
+        {
+            _settings.IslandSnapToTop = true;
+            _settings.IslandTopOffset = Math.Clamp(Math.Round(Top - workArea.Top), 0, 120);
+            _settings.IslandLeft = double.NaN;
+            _settings.IslandTop = double.NaN;
+            ApplyIslandPlacement();
+        }
+        else
+        {
+            _settings.IslandSnapToTop = false;
+            _settings.IslandLeft = Left;
+            _settings.IslandTop = Top;
+        }
+
+        _settingsService.Save(_settings);
+        ApplyLocalizedText();
+        ApplySettingsToControls();
+    }
+
     private void UpdatePositionSliders()
     {
         _applyingSettings = true;
@@ -1590,13 +1886,34 @@ public partial class MainWindow : Window
         {
             OriginalText.Text = original;
             MainLyricText.Text = main;
+            IslandOriginalText.Text = original;
+            IslandMainLyricText.Text = main;
             OriginalText.Opacity = 1;
             MainLyricText.Opacity = 1;
+            IslandOriginalText.Opacity = 1;
+            IslandMainLyricText.Opacity = 1;
             return;
         }
 
         AnimateTextChange(OriginalText, original);
         AnimateTextChange(MainLyricText, main);
+        AnimateTextChange(IslandOriginalText, original);
+        AnimateTextChange(IslandMainLyricText, main);
+    }
+
+    private void SetIslandLyricText(string original, string main, bool animate = true)
+    {
+        if (!animate || IslandOriginalText.Text == original && IslandMainLyricText.Text == main)
+        {
+            IslandOriginalText.Text = original;
+            IslandMainLyricText.Text = main;
+            IslandOriginalText.Opacity = 1;
+            IslandMainLyricText.Opacity = 1;
+            return;
+        }
+
+        AnimateTextChange(IslandOriginalText, original);
+        AnimateTextChange(IslandMainLyricText, main);
     }
 
     private static void AnimateTextChange(TextBlock textBlock, string nextText)
@@ -1666,6 +1983,7 @@ public partial class MainWindow : Window
         {
             ShowWindowAndBringFront();
             SettingsPanel.Visibility = Visibility.Visible;
+            ApplySettings();
         }));
         _trayMenu.Items.Add("translation", null, (_, _) => Dispatcher.Invoke(ToggleTranslation));
         _trayMenu.Items.Add("lyrics-only", null, (_, _) => Dispatcher.Invoke(() =>
@@ -1706,7 +2024,7 @@ public partial class MainWindow : Window
         _trayMenu.Items[0].Text = _ui.ShowWindow;
         _trayMenu.Items[1].Text = _ui.Settings;
         _trayMenu.Items[2].Text = _settings.ShowTranslation ? _ui.ToggleTranslationOn : _ui.ToggleTranslationOff;
-        _trayMenu.Items[3].Text = _ui.ExitLyricsOnly;
+        _trayMenu.Items[3].Text = _settings.LyricsOnlyMode ? _ui.ExitLyricsOnly : _ui.LyricsOnlyMode;
         _trayMenu.Items[4].Text = _ui.RescanLyrics;
         _trayMenu.Items[6].Text = _ui.Exit;
 
@@ -1736,6 +2054,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _timer.Stop();
+        RememberWindowPlacement();
         _autoRetryCancellation?.Cancel();
         _loadCancellation?.Cancel();
         _translationCancellation?.Cancel();
@@ -1766,4 +2085,37 @@ public partial class MainWindow : Window
         int cx,
         int cy,
         SetWindowPosFlags flags);
+
+    private sealed class ScrollViewerOffsetAnimator : Animatable
+    {
+        private readonly ScrollViewer _scrollViewer;
+
+        public ScrollViewerOffsetAnimator(ScrollViewer scrollViewer)
+        {
+            _scrollViewer = scrollViewer;
+        }
+
+        public static readonly DependencyProperty OffsetProperty = DependencyProperty.Register(
+            nameof(Offset),
+            typeof(double),
+            typeof(ScrollViewerOffsetAnimator),
+            new PropertyMetadata(0.0, OnOffsetChanged));
+
+        public double Offset
+        {
+            get => (double)GetValue(OffsetProperty);
+            set => SetValue(OffsetProperty, value);
+        }
+
+        private static void OnOffsetChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs e)
+        {
+            if (dependencyObject is ScrollViewerOffsetAnimator animator)
+            {
+                animator._scrollViewer.ScrollToVerticalOffset((double)e.NewValue);
+            }
+        }
+
+        protected override Freezable CreateInstanceCore() =>
+            new ScrollViewerOffsetAnimator(_scrollViewer);
+    }
 }

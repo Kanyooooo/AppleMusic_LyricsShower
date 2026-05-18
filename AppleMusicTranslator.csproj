@@ -16,4 +16,8 @@
     <None Remove="Diagnostics\**" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.17" />
+  </ItemGroup>
+
 </Project>

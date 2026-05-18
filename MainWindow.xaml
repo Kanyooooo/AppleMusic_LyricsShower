@@ -188,6 +188,43 @@
                                TextWrapping="Wrap" />
                 </Grid>
 
+                <Grid x:Name="IslandLyricsView"
+                      Visibility="Collapsed">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="6" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border x:Name="IslandAccentBar"
+                            Width="4"
+                            Margin="0,8,12,8"
+                            Background="#FF5DFFE6"
+                            CornerRadius="2" />
+                    <Grid Grid.Column="1"
+                          VerticalAlignment="Center">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock x:Name="IslandOriginalText"
+                                   Foreground="#D5FFFFFF"
+                                   FontFamily="Microsoft YaHei UI"
+                                   FontSize="13"
+                                   Text=""
+                                   TextAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="IslandMainLyricText"
+                                   Grid.Row="1"
+                                   Margin="0,3,0,0"
+                                   Foreground="#FFFFFFFF"
+                                   FontFamily="Microsoft YaHei UI"
+                                   FontSize="22"
+                                   FontWeight="Bold"
+                                   Text="Lyrics are standing by"
+                                   TextAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" />
+                    </Grid>
+                </Grid>
+
                 <ScrollViewer x:Name="VerticalLyricsView"
                               VerticalScrollBarVisibility="Hidden"
                               HorizontalScrollBarVisibility="Disabled"
@@ -282,6 +319,24 @@
                                   Unchecked="VerticalLyricsCheckBox_Changed"
                                   Foreground="#FFFFFFFF"
                                   Content="Vertical lyrics" />
+                        <CheckBox x:Name="IslandModeCheckBox"
+                                  Margin="0,0,0,10"
+                                  Checked="IslandModeCheckBox_Changed"
+                                  Unchecked="IslandModeCheckBox_Changed"
+                                  Foreground="#FFFFFFFF"
+                                  Content="Dynamic island" />
+                        <CheckBox x:Name="AutoScrollLongLyricsCheckBox"
+                                  Margin="0,0,0,10"
+                                  Checked="AutoScrollLongLyricsCheckBox_Changed"
+                                  Unchecked="AutoScrollLongLyricsCheckBox_Changed"
+                                  Foreground="#FFFFFFFF"
+                                  Content="Auto scroll long lyrics" />
+                        <CheckBox x:Name="AutoCenterCurrentLyricCheckBox"
+                                  Margin="0,0,0,10"
+                                  Checked="AutoCenterCurrentLyricCheckBox_Changed"
+                                  Unchecked="AutoCenterCurrentLyricCheckBox_Changed"
+                                  Foreground="#FFFFFFFF"
+                                  Content="Center current lyric" />
                         <CheckBox x:Name="AutoLyricsPanelCheckBox"
                                   Margin="0,0,0,10"
                                   Checked="AutoLyricsPanelCheckBox_Changed"
@@ -339,6 +394,27 @@
                                 Maximum="180"
                                 TickFrequency="1"
                                 ValueChanged="LyricPositionYSlider_ValueChanged" />
+
+                        <TextBlock x:Name="IslandWidthLabel" Margin="0,10,0,0" Foreground="#BFC8D3D8" Text="Island width" />
+                        <Slider x:Name="IslandWidthSlider"
+                                Minimum="360"
+                                Maximum="1200"
+                                TickFrequency="10"
+                                ValueChanged="IslandWidthSlider_ValueChanged" />
+
+                        <TextBlock x:Name="IslandHeightLabel" Margin="0,10,0,0" Foreground="#BFC8D3D8" Text="Island height" />
+                        <Slider x:Name="IslandHeightSlider"
+                                Minimum="68"
+                                Maximum="180"
+                                TickFrequency="2"
+                                ValueChanged="IslandHeightSlider_ValueChanged" />
+
+                        <TextBlock x:Name="IslandTopOffsetLabel" Margin="0,10,0,0" Foreground="#BFC8D3D8" Text="Island top offset" />
+                        <Slider x:Name="IslandTopOffsetSlider"
+                                Minimum="0"
+                                Maximum="120"
+                                TickFrequency="1"
+                                ValueChanged="IslandTopOffsetSlider_ValueChanged" />
 
                         <TextBlock x:Name="MainColorLabel" Margin="0,12,0,6" Foreground="#BFC8D3D8" Text="Main color" />
                         <StackPanel Orientation="Horizontal">

@@ -1,6 +1,6 @@
 # AppleMusic Translator
 
-Windows Apple Music 歌词翻译悬浮窗。它会读取 Apple Music 当前播放信息，优先从 Apple Music 进程内存里抓官方 TTML 同步歌词，再后台懒加载翻译。
+Windows Apple Music 歌词翻译悬浮窗。它会读取 Apple Music 当前播放信息，优先从 Apple Music 进程内存中抓取官方 TTML 同步歌词，先显示歌词，再后台懒加载翻译。
 
 这个项目是 `AppleMusic_LyricsShower` 的重写版：核心仍然是内存取证式抓歌词，但现在更偏向稳定、低误判和日常可用。
 
@@ -8,30 +8,64 @@ Windows Apple Music 歌词翻译悬浮窗。它会读取 Apple Music 当前播�
 
 - 识别 Windows Apple Music 当前曲目、歌手、专辑、进度和时长。
 - 扫描 Apple Music 进程内存，解析官方 TTML 同步歌词。
-- 自动尝试通过 UIAutomation 打开 Apple Music 歌词面板，Apple Music 在后台时也尽量触发懒加载。
-- 使用 Apple Music 右侧歌词面板的可见文本做兜底，处理部分歌曲没有连续 TTML XML 的情况。
-- 第一次没抓到时会自动延迟重扫一次，减少切歌瞬间歌词还没进内存导致的漏抓。
-- 已命中的整首歌词会缓存到本机；下次切歌先秒开缓存歌词，再后台校验 Apple Music 内存。
-- 提供“不是这首歌”按钮，可以删除当前歌曲的歌词缓存并强制重扫。
+- 自动尝试通过 UIAutomation 打开 Apple Music 歌词面板，Apple Music 在后台时也尽量触发歌词加载。
+- 读取 Apple Music 右侧歌词面板的可见文本作为锚点，降低串歌概率。
+- 第一次没抓到时会自动延迟重扫一次，减少切歌瞬间歌词还没进入内存导致的漏抓。
+- 已命中的整首歌词会缓存到本机 SQLite 数据库，下次切歌先秒开缓存，再后台校验实时内存。
+- 提供“不是这首歌”按钮，可以删除当前曲目的歌词缓存并强制重扫。
 - 如果同一份歌词缓存疑似被不同歌曲共用，按钮会显示冲突提示，方便人工判断。
-- 后台懒加载翻译，先显示歌词，翻译缓存命中后自动补上中文。
-- 支持居中歌词和 Apple Music 风格竖向歌词列表。
-- 支持显示/隐藏翻译、歌词提前量、字体大小、文字颜色、背景色、强调色、背景透明度。
-- 支持自动文字对比度，深色/浅色背景下尽量避免文字糊成一团。
-- 支持拖动歌词区域微调显示位置，也可以在设置里用滑杆调 X/Y 偏移。
+- 后台懒加载翻译，先显示原文，翻译缓存命中后自动补上中文。
+- 支持居中歌词、竖向歌词列表、顶部灵动岛模式。
+- 竖向歌词支持长屏幕自动滚动，并可将当前歌词自动居中。
+- 支持显示/隐藏翻译、歌词提前量、字号、文字颜色、背景色、强调色、背景透明度。
+- 支持自动文字对比度，深色/浅色背景下尽量避免文字和背景糊在一起。
+- 支持拖动歌词区域微调显示位置，也可以在设置中用滑杆调 X/Y 偏移。
 - 支持仅歌词模式，并提供托盘菜单找回设置窗口。
+- 窗口、样式和自定义参数会记忆到本机设置文件。
 - 歌词窗口会持续保持最高层显示。
 - LRCLIB 备用源：内存歌词和可见歌词都不可用时再尝试。
 
+## 显示模式
+
+- 居中歌词：默认模式，适合普通桌面悬浮。
+- 竖向歌词：类似 Apple Music 的纵向歌词列表，当前歌词可自动居中并平滑滚动。
+- 灵动岛模式：参考 Lyricify 的顶部歌词岛体验，窗口会吸附在屏幕上侧，显示更紧凑的原文/翻译。
+
+灵动岛宽度、高度和顶部间距都可以在设置中调整。进入仅歌词或灵动岛后，仍然可以从系统托盘右键打开设置。
+
 ## 匹配策略
 
-为避免串歌，匹配逻辑比较保守：
+为了避免串歌，匹配逻辑比较保守：
 
 - 有 Apple Music 可见歌词锚点时，要求内存 TTML 候选命中这些锚点。
 - 没有锚点时，只接受时长非常接近且明显优于其他候选的结果。
 - 如果官方 TTML 没有命中，但右侧歌词面板能读到文本，会切到 `Apple Music visible lyrics` 兜底模式。
-- 兜底模式会定时读取右侧面板当前可见歌词，因此请保持 Apple Music 歌词面板打开。
-- 本地歌词缓存只用于快速显示；后台仍会尝试用实时内存结果替换。
+- 兜底模式会定时读取右侧面板当前可见歌词，因此请尽量保持 Apple Music 歌词面板打开。
+- 本地歌词缓存只用于快速显示；后台仍会尝试用实时内存结果替换缓存。
+
+## 数据与缓存
+
+翻译缓存只保存“单句原文 -> 中文翻译”：
+
+```text
+%AppData%\AppleMusicTranslator\translation-cache.json
+```
+
+歌词缓存保存“歌曲 -> 整首同步歌词”，用于下次切歌秒开：
+
+```text
+%AppData%\AppleMusicTranslator\lyrics-cache.db
+```
+
+旧版本的 `lyrics-cache.json` 会在第一次启动时自动迁移到 SQLite 数据库。数据库会自动创建索引，并按歌曲 key / 歌词 fingerprint 查询，避免每次启动解析整包 JSON。
+
+用户自定义设置会保存在：
+
+```text
+%AppData%\AppleMusicTranslator\settings.json
+```
+
+本工具会读取 Apple Music 进程内存来寻找歌词，不会修改 Apple Music 进程，也不会注入 Apple Music。
 
 ## 运行
 
@@ -45,6 +79,7 @@ dotnet run .\AppleMusicTranslator.csproj
 
 ```powershell
 dotnet build .\AppleMusicTranslator.csproj -c Release
+dotnet build .\Diagnostics\AppleMusicTranslator.Diagnostics.csproj -c Release
 ```
 
 ## 打包
@@ -71,24 +106,6 @@ bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\AppleMusicTranslator.exe
 
 切歌时工具会自动快速扫描；如果第一次没赶上 Apple Music 写入歌词内存，会自动再扫描一次。
 
-设置里可以切换竖向歌词、调整提前量、颜色和位置。拖动歌词区域本身可以快速调整歌词相对窗口的位置。
-
-## 数据与缓存
-
-翻译缓存只保存“单句原文 -> 中文翻译”：
-
-```text
-%AppData%\AppleMusicTranslator\translation-cache.json
-```
-
-歌词缓存保存“歌曲 -> 整首歌词”，用于下次切歌秒开：
-
-```text
-%AppData%\AppleMusicTranslator\lyrics-cache.json
-```
-
-本工具会读取 Apple Music 进程内存来寻找歌词，不会修改 Apple Music 进程。
-
 ## 诊断
 
 仓库里带了一个诊断项目，可以查看当前曲目、可见歌词锚点和内存 TTML 候选：
@@ -108,4 +125,9 @@ dotnet run --project .\Diagnostics\AppleMusicTranslator.Diagnostics.csproj -c Re
 - Apple Music 的 Windows 客户端不同版本内存布局差异很大，部分歌曲可能只有渲染后的歌词文本，没有完整连续 TTML XML。
 - 可见歌词兜底依赖 Apple Music 右侧歌词面板；自动打开失败时，需要手动打开一次。
 - 可见歌词兜底没有官方逐行时间戳，只适合作为“能看到和翻译当前歌词”的保底方案。
-- UIAutomation 打开歌词面板不是进程注入式 hook，不会修改 Apple Music；如果 Apple Music 控件名变化，可能需要重新适配。
+- UIAutomation 打开歌词面板不是进程注入式 hook，不会修改 Apple Music；如果 Apple Music 控件结构变化，可能需要重新适配。
+
+## 参考
+
+- [Lyricify App](https://github.com/WXRIW/Lyricify-App)：顶部歌词岛、桌面歌词等体验方向参考。
+- [163MusicLyrics](https://github.com/jitwxs/163MusicLyrics)：歌词源和歌词缓存思路参考。

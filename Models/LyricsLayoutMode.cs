@@ -3,5 +3,6 @@ namespace AppleMusicTranslator.Models;
 public enum LyricsLayoutMode
 {
     Center = 0,
-    Vertical = 1
+    Vertical = 1,
+    Island = 2
 }

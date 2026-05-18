@@ -10,6 +10,10 @@ public sealed class AppSettings
 
     public bool AutoContrastText { get; set; } = true;
 
+    public bool AutoScrollLongLyrics { get; set; } = true;
+
+    public bool AutoCenterCurrentLyric { get; set; } = true;
+
     public LyricsLayoutMode LayoutMode { get; set; } = LyricsLayoutMode.Center;
 
     public UiLanguage InterfaceLanguage { get; set; } = UiLanguage.ChineseSimplified;
@@ -27,6 +31,26 @@ public sealed class AppSettings
     public double LyricOffsetX { get; set; }
 
     public double LyricOffsetY { get; set; }
+
+    public double WindowLeft { get; set; } = double.NaN;
+
+    public double WindowTop { get; set; } = double.NaN;
+
+    public double WindowWidth { get; set; } = 980;
+
+    public double WindowHeight { get; set; } = 360;
+
+    public double IslandWidth { get; set; } = 620;
+
+    public double IslandHeight { get; set; } = 86;
+
+    public double IslandTopOffset { get; set; } = 10;
+
+    public bool IslandSnapToTop { get; set; } = true;
+
+    public double IslandLeft { get; set; } = double.NaN;
+
+    public double IslandTop { get; set; } = double.NaN;
 
     public string OriginalColor { get; set; } = "#D5FFFFFF";
 

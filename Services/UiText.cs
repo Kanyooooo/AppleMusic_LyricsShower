@@ -21,7 +21,7 @@ public sealed class UiText
     public string WindowTitle => Language == UiLanguage.English ? "Apple Music Translator" : "Apple Music 歌词翻译";
     public string WaitingForAppleMusicTitle => Language == UiLanguage.English ? "Waiting for Apple Music" : "等待 Apple Music";
     public string WaitingForAppleMusicStatus => Language == UiLanguage.English ? "Play a song in Apple Music" : "请在 Apple Music 中播放一首歌";
-    public string LoadingLyrics => Language == UiLanguage.English ? "Loading lyrics..." : "正在加载歌词...";
+    public string LoadingLyrics => Language == UiLanguage.English ? "Loading lyrics" : "正在加载歌词";
     public string ScanningMemory => Language == UiLanguage.English ? "Scanning Apple Music memory" : "正在扫描 Apple Music 内存";
     public string AppleMusicProcessNotFound => Language == UiLanguage.English ? "Apple Music process not found" : "未找到 Apple Music 进程";
     public string MemoryLyricsMissedFallback => Language == UiLanguage.English ? "Memory lyrics missed; trying LRCLIB fallback" : "内存歌词没有命中，正在尝试 LRCLIB 备用源";

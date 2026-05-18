@@ -594,7 +594,7 @@ public partial class MainWindow : Window
 
             foreach (var line in lyrics.Lines)
             {
-                if (_translationService.TryGetCachedTranslation(line.Text, out var cached))
+                if (_translationService.TryGetCachedTranslation(line.Text, _settings.InterfaceLanguage, out var cached))
                 {
                     _translations[line.Text] = cached;
                 }
@@ -633,10 +633,14 @@ public partial class MainWindow : Window
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
-        _ = TranslateTextsInBackgroundAsync(trackKey, nearbyTexts, token);
+        _ = TranslateTextsInBackgroundAsync(trackKey, nearbyTexts, _settings.InterfaceLanguage, token);
     }
 
-    private async Task TranslateTextsInBackgroundAsync(string trackKey, IReadOnlyList<string> texts, CancellationToken cancellationToken)
+    private async Task TranslateTextsInBackgroundAsync(
+        string trackKey,
+        IReadOnlyList<string> texts,
+        UiLanguage targetLanguage,
+        CancellationToken cancellationToken)
     {
         var completed = 0;
 
@@ -651,7 +655,7 @@ public partial class MainWindow : Window
                 },
                 async (text, token) =>
                 {
-                    await TranslateAndStoreAsync(trackKey, text, token);
+                    await TranslateAndStoreAsync(trackKey, text, targetLanguage, token);
                     var done = Interlocked.Increment(ref completed);
                     await Dispatcher.InvokeAsync(() =>
                     {
@@ -681,7 +685,11 @@ public partial class MainWindow : Window
         });
     }
 
-    private async Task TranslateAndStoreAsync(string trackKey, string text, CancellationToken cancellationToken)
+    private async Task TranslateAndStoreAsync(
+        string trackKey,
+        string text,
+        UiLanguage targetLanguage,
+        CancellationToken cancellationToken)
     {
         lock (_translationLock)
         {
@@ -693,17 +701,20 @@ public partial class MainWindow : Window
 
         try
         {
-            var translated = await _translationService.TranslateLineAsync(text, cancellationToken);
+            var translated = await _translationService.TranslateLineAsync(text, targetLanguage, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
 
             lock (_translationLock)
             {
-                _translations[text] = translated;
+                if (_settings.InterfaceLanguage == targetLanguage)
+                {
+                    _translations[text] = translated;
+                }
             }
 
             await Dispatcher.InvokeAsync(() =>
             {
-                if (_loadedTrackKey == trackKey)
+                if (_loadedTrackKey == trackKey && _settings.InterfaceLanguage == targetLanguage)
                 {
                     UpdateCurrentLyric(_latestTrack, force: true);
                 }
@@ -725,7 +736,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _ = TranslateAndStoreAsync(_loadedTrackKey, line.Text, _translationCancellation.Token);
+        _ = TranslateAndStoreAsync(_loadedTrackKey, line.Text, _settings.InterfaceLanguage, _translationCancellation.Token);
     }
 
     private void UpdateTrackUi(TrackInfo track)
@@ -1728,7 +1739,15 @@ public partial class MainWindow : Window
         if (Enum.TryParse<UiLanguage>(item.Tag?.ToString(), out var language))
         {
             _settings.InterfaceLanguage = language;
+            lock (_translationLock)
+            {
+                _translations.Clear();
+                _translationInFlight.Clear();
+            }
+
             SaveAndApplySettings();
+            LoadCachedTranslations(_lyrics);
+            OnTranslationSettingChanged();
         }
     }
 

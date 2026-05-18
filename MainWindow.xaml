@@ -478,7 +478,7 @@
                     HorizontalAlignment="Right"
                     VerticalAlignment="Bottom"
                     Click="SettingsButton_Click"
-                    Content="..."
+                    Content="设置"
                     ContextMenuOpening="CornerSettingsButton_ContextMenuOpening"
                     Style="{StaticResource ToolButtonStyle}"
                     ToolTip="Settings"

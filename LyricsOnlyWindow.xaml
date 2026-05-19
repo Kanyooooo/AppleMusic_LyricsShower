@@ -1,0 +1,65 @@
+<Window x:Class="AppleMusicTranslator.LyricsOnlyWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="860"
+        Height="220"
+        MinWidth="360"
+        MinHeight="120"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="CanResizeWithGrip"
+        ShowInTaskbar="False"
+        Topmost="True"
+        WindowStartupLocation="Manual"
+        WindowStyle="None"
+        LocationChanged="Window_LocationChanged"
+        SizeChanged="Window_SizeChanged">
+    <Window.ContextMenu>
+        <ContextMenu>
+            <MenuItem x:Name="SettingsMenuItem" Header="Settings" Click="SettingsMenuItem_Click" />
+            <MenuItem x:Name="RescanMenuItem" Header="Rescan lyrics" Click="RescanMenuItem_Click" />
+            <MenuItem x:Name="TranslationMenuItem" Header="Toggle translation" Click="TranslationMenuItem_Click" />
+            <Separator />
+            <MenuItem x:Name="ExitLyricsOnlyMenuItem" Header="Exit lyrics-only" Click="ExitLyricsOnlyMenuItem_Click" />
+        </ContextMenu>
+    </Window.ContextMenu>
+
+    <Border x:Name="Shell"
+            Padding="8"
+            Background="Transparent"
+            MouseLeftButtonDown="Shell_MouseLeftButtonDown">
+        <Grid>
+            <Grid x:Name="CenterView"
+                  HorizontalAlignment="Stretch"
+                  VerticalAlignment="Center">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock x:Name="OriginalText"
+                           FontFamily="Microsoft YaHei UI"
+                           FontSize="18"
+                           Foreground="#D5FFFFFF"
+                           TextAlignment="Center"
+                           TextWrapping="Wrap" />
+                <TextBlock x:Name="MainText"
+                           Grid.Row="1"
+                           Margin="0,8,0,0"
+                           FontFamily="Microsoft YaHei UI"
+                           FontSize="30"
+                           FontWeight="Bold"
+                           Foreground="#FFFFFFFF"
+                           LineHeight="38"
+                           TextAlignment="Center"
+                           TextWrapping="Wrap" />
+            </Grid>
+
+            <ScrollViewer x:Name="VerticalView"
+                          Visibility="Collapsed"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Hidden">
+                <StackPanel x:Name="VerticalPanel" />
+            </ScrollViewer>
+        </Grid>
+    </Border>
+</Window>

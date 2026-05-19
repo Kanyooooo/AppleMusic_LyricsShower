@@ -1,0 +1,16 @@
+bin/
+obj/
+**/bin/
+**/obj/
+Release/
+.reference/
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.log
+*.tmp
+translation-review*.md
+publish/
+publish-*/

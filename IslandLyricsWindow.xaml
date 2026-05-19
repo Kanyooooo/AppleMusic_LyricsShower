@@ -1,0 +1,74 @@
+<Window x:Class="AppleMusicTranslator.IslandLyricsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="620"
+        Height="86"
+        MinWidth="360"
+        MinHeight="64"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Topmost="True"
+        WindowStartupLocation="Manual"
+        WindowStyle="None"
+        LocationChanged="Window_LocationChanged">
+    <Window.ContextMenu>
+        <ContextMenu>
+            <MenuItem x:Name="SettingsMenuItem" Header="Settings" Click="SettingsMenuItem_Click" />
+            <MenuItem x:Name="RescanMenuItem" Header="Rescan lyrics" Click="RescanMenuItem_Click" />
+            <MenuItem x:Name="TranslationMenuItem" Header="Toggle translation" Click="TranslationMenuItem_Click" />
+            <Separator />
+            <MenuItem x:Name="ExitIslandMenuItem" Header="Exit dynamic island" Click="ExitIslandMenuItem_Click" />
+        </ContextMenu>
+    </Window.ContextMenu>
+
+    <Border x:Name="Shell"
+            Padding="24,9"
+            Background="#D9181B22"
+            BorderBrush="#665DFFE6"
+            BorderThickness="1"
+            CornerRadius="43"
+            RenderTransformOrigin="0.5,0.5"
+            MouseLeftButtonDown="Shell_MouseLeftButtonDown">
+        <Border.RenderTransform>
+            <ScaleTransform x:Name="ShellScaleTransform" ScaleX="1" ScaleY="1" />
+        </Border.RenderTransform>
+
+        <Grid VerticalAlignment="Center">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="4" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border x:Name="AccentBar"
+                    Width="3"
+                    Margin="0,10,12,10"
+                    Background="#FF5DFFE6"
+                    CornerRadius="2" />
+
+            <Grid Grid.Column="1"
+                  VerticalAlignment="Center">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock x:Name="OriginalText"
+                           FontFamily="Microsoft YaHei UI"
+                           FontSize="13"
+                           Foreground="#D5FFFFFF"
+                           TextAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="MainText"
+                           Grid.Row="1"
+                           Margin="0,2,0,0"
+                           FontFamily="Microsoft YaHei UI"
+                           FontSize="22"
+                           FontWeight="Bold"
+                           Foreground="#FFFFFFFF"
+                           TextAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

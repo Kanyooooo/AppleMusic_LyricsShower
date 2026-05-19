@@ -1,0 +1,8 @@
+* text=auto eol=lf
+
+*.sln text eol=crlf
+*.csproj text eol=lf
+*.xaml text eol=lf
+*.cs text eol=lf
+*.md text eol=lf
+*.ps1 text eol=lf

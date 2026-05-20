@@ -7,7 +7,7 @@
         MinHeight="120"
         AllowsTransparency="True"
         Background="Transparent"
-        ResizeMode="CanResizeWithGrip"
+        ResizeMode="CanResize"
         ShowInTaskbar="False"
         Topmost="True"
         WindowStartupLocation="Manual"

@@ -65,12 +65,6 @@ internal sealed class DisplayModeCoordinator
             _rememberNormalPlacement();
         }
 
-        if (previousMode == WindowShellMode.Island && mode != WindowShellMode.Island)
-        {
-            _settings.IslandLeft = double.NaN;
-            _settings.IslandTop = double.NaN;
-        }
-
         switch (mode)
         {
             case WindowShellMode.Normal:
@@ -87,9 +81,6 @@ internal sealed class DisplayModeCoordinator
             case WindowShellMode.Island:
                 _settings.LyricsOnlyMode = false;
                 _settings.LayoutMode = LyricsLayoutMode.Island;
-                _settings.IslandSnapToTop = true;
-                _settings.IslandLeft = double.NaN;
-                _settings.IslandTop = double.NaN;
                 break;
         }
 
@@ -295,7 +286,7 @@ internal sealed class DisplayModeCoordinator
         }
 
         _owner.WindowState = WindowState.Normal;
-        _owner.ResizeMode = ResizeMode.CanResizeWithGrip;
+        _owner.ResizeMode = ResizeMode.CanResize;
         _owner.MinWidth = 520;
         _owner.MinHeight = 180;
         _applyNormalPlacement();

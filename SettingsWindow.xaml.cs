@@ -14,6 +14,7 @@ public partial class SettingsWindow : Window
     private readonly AppSettings _settings;
     private readonly MainWindow _owner;
     private bool _applyingSettings;
+    private bool _suppressPlacementSave;
     private UiText _ui;
 
     public SettingsWindow(AppSettings settings, MainWindow owner)
@@ -24,7 +25,11 @@ public partial class SettingsWindow : Window
         _applyingSettings = true;
         InitializeComponent();
         _applyingSettings = false;
+        RestorePlacement();
         ReloadFromSettings();
+        Closed += SettingsWindow_Closed;
+        LocationChanged += SettingsWindow_PlacementChanged;
+        SizeChanged += SettingsWindow_SizeChanged;
     }
 
     public void ReloadFromSettings()
@@ -161,6 +166,55 @@ public partial class SettingsWindow : Window
     }
 
     private void CloseSettingsButton_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void SettingsWindow_Closed(object? sender, EventArgs e)
+    {
+        RememberPlacement();
+        _owner.SaveSettingsOnly();
+    }
+
+    private void SettingsWindow_PlacementChanged(object? sender, EventArgs e) => RememberPlacement();
+
+    private void SettingsWindow_SizeChanged(object sender, SizeChangedEventArgs e) => RememberPlacement();
+
+    private void RestorePlacement()
+    {
+        _suppressPlacementSave = true;
+        try
+        {
+            Width = Math.Clamp(_settings.SettingsWindowWidth, MinWidth, 900);
+            Height = Math.Clamp(_settings.SettingsWindowHeight, MinHeight, 1100);
+            if (double.IsFinite(_settings.SettingsWindowLeft) && double.IsFinite(_settings.SettingsWindowTop))
+            {
+                var workArea = SystemParameters.WorkArea;
+                WindowStartupLocation = WindowStartupLocation.Manual;
+                Left = Math.Clamp(_settings.SettingsWindowLeft, workArea.Left, Math.Max(workArea.Left, workArea.Right - Width));
+                Top = Math.Clamp(_settings.SettingsWindowTop, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - Height));
+            }
+        }
+        finally
+        {
+            _suppressPlacementSave = false;
+        }
+    }
+
+    private void RememberPlacement()
+    {
+        if (_suppressPlacementSave || WindowState != WindowState.Normal)
+        {
+            return;
+        }
+
+        _settings.SettingsWindowWidth = Math.Clamp(Width, MinWidth, 900);
+        _settings.SettingsWindowHeight = Math.Clamp(Height, MinHeight, 1100);
+        if (double.IsFinite(Left) && double.IsFinite(Top))
+        {
+            _settings.SettingsWindowLeft = Left;
+            _settings.SettingsWindowTop = Top;
+        }
+
+        _owner.SaveSettingsOnly();
+    }
 
     private void ShowTranslationCheckBox_Changed(object sender, RoutedEventArgs e)
     {

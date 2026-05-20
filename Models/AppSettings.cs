@@ -60,6 +60,14 @@ public sealed class AppSettings
 
     public double IslandTop { get; set; } = double.NaN;
 
+    public double SettingsWindowLeft { get; set; } = double.NaN;
+
+    public double SettingsWindowTop { get; set; } = double.NaN;
+
+    public double SettingsWindowWidth { get; set; } = 420;
+
+    public double SettingsWindowHeight { get; set; } = 680;
+
     public bool LockLyricsPosition { get; set; } = true;
 
     public bool EnableIslandBreathing { get; set; } = true;

@@ -18,6 +18,7 @@ public sealed class ProcessMemoryTtmlExtractor
     private const int MaxReadsPerScan = 40;
     private const int MaxAnchoredReadsPerScan = 128;
     private const int MaxCachedAddressesPerProcess = 32;
+    private static readonly TimeSpan MaxFullScanDuration = TimeSpan.FromSeconds(6);
 
     private readonly object _addressCacheLock = new();
     private readonly Dictionary<CacheScope, ScopeCache> _ttmlAddressCache = new();
@@ -299,10 +300,15 @@ public sealed class ProcessMemoryTtmlExtractor
         var blocks = new List<byte[]>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         ulong address = 0;
+        var startedAt = DateTime.UtcNow;
 
         while (address < MaxUserModeAddress && blocks.Count < MaxBlocks)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (DateTime.UtcNow - startedAt > MaxFullScanDuration)
+            {
+                break;
+            }
 
             if (VirtualQueryEx(processHandle, new IntPtr(unchecked((long)address)), out var mbi, (uint)Marshal.SizeOf<MemoryBasicInformation64>()) == UIntPtr.Zero)
             {

@@ -1,12 +1,19 @@
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using AppleMusicTranslator.Models;
 
 namespace AppleMusicTranslator.Services;
 
 public sealed class AppSettingsService
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
+    };
+
     private readonly string _settingsPath;
 
     public AppSettingsService()
@@ -28,7 +35,7 @@ public sealed class AppSettingsService
         try
         {
             var json = File.ReadAllText(_settingsPath, Encoding.UTF8);
-            var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+            var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
             if (Migrate(settings, json))
             {
                 Save(settings);
@@ -46,12 +53,12 @@ public sealed class AppSettingsService
     {
         try
         {
-            var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
+            var json = JsonSerializer.Serialize(settings, JsonOptions);
             WriteAllTextAtomic(_settingsPath, json);
         }
-        catch
+        catch (Exception ex)
         {
-            // Style persistence should never interrupt playback display.
+            AppLogger.Warn("Failed to save application settings.", ex);
         }
     }
 
@@ -127,6 +134,15 @@ public sealed class AppSettingsService
             changed = true;
         }
 
+        if (!rawJson.Contains(nameof(AppSettings.SettingsWindowWidth), StringComparison.Ordinal))
+        {
+            settings.SettingsWindowWidth = defaults.SettingsWindowWidth;
+            settings.SettingsWindowHeight = defaults.SettingsWindowHeight;
+            settings.SettingsWindowLeft = double.NaN;
+            settings.SettingsWindowTop = double.NaN;
+            changed = true;
+        }
+
         if (!rawJson.Contains(nameof(AppSettings.BackgroundColor), StringComparison.Ordinal))
         {
             settings.BackgroundColor = defaults.BackgroundColor;
@@ -146,6 +162,8 @@ public sealed class AppSettingsService
         var originalLyricsOnlyTop = settings.LyricsOnlyTop;
         var originalIslandLeft = settings.IslandLeft;
         var originalIslandTop = settings.IslandTop;
+        var originalSettingsWindowLeft = settings.SettingsWindowLeft;
+        var originalSettingsWindowTop = settings.SettingsWindowTop;
         var originalOriginalColor = settings.OriginalColor;
         var originalMainColor = settings.MainColor;
         var originalBackgroundColor = settings.BackgroundColor;
@@ -179,6 +197,8 @@ public sealed class AppSettingsService
         var originalIslandWidth = settings.IslandWidth;
         var originalIslandHeight = settings.IslandHeight;
         var originalIslandTopOffset = settings.IslandTopOffset;
+        var originalSettingsWindowWidth = settings.SettingsWindowWidth;
+        var originalSettingsWindowHeight = settings.SettingsWindowHeight;
         settings.WindowWidth = ClampFinite(settings.WindowWidth, 520, 2200, defaults.WindowWidth);
         settings.WindowHeight = ClampFinite(settings.WindowHeight, 180, 1400, defaults.WindowHeight);
         settings.LyricsOnlyWidth = ClampFinite(settings.LyricsOnlyWidth, 360, 2200, defaults.LyricsOnlyWidth);
@@ -186,6 +206,8 @@ public sealed class AppSettingsService
         settings.IslandWidth = ClampFinite(settings.IslandWidth, 360, 1200, defaults.IslandWidth);
         settings.IslandHeight = ClampFinite(settings.IslandHeight, 68, 180, defaults.IslandHeight);
         settings.IslandTopOffset = ClampFinite(settings.IslandTopOffset, 0, 120, defaults.IslandTopOffset);
+        settings.SettingsWindowWidth = ClampFinite(settings.SettingsWindowWidth, 380, 900, defaults.SettingsWindowWidth);
+        settings.SettingsWindowHeight = ClampFinite(settings.SettingsWindowHeight, 520, 1100, defaults.SettingsWindowHeight);
 
         settings.WindowLeft = FiniteOrNaN(settings.WindowLeft);
         settings.WindowTop = FiniteOrNaN(settings.WindowTop);
@@ -193,6 +215,8 @@ public sealed class AppSettingsService
         settings.LyricsOnlyTop = FiniteOrNaN(settings.LyricsOnlyTop);
         settings.IslandLeft = FiniteOrNaN(settings.IslandLeft);
         settings.IslandTop = FiniteOrNaN(settings.IslandTop);
+        settings.SettingsWindowLeft = FiniteOrNaN(settings.SettingsWindowLeft);
+        settings.SettingsWindowTop = FiniteOrNaN(settings.SettingsWindowTop);
 
         settings.OriginalColor = ValidHexColorOrDefault(settings.OriginalColor, defaults.OriginalColor);
         settings.MainColor = ValidHexColorOrDefault(settings.MainColor, defaults.MainColor);
@@ -216,12 +240,16 @@ public sealed class AppSettingsService
             || HasChanged(settings.IslandWidth, originalIslandWidth)
             || HasChanged(settings.IslandHeight, originalIslandHeight)
             || HasChanged(settings.IslandTopOffset, originalIslandTopOffset)
+            || HasChanged(settings.SettingsWindowWidth, originalSettingsWindowWidth)
+            || HasChanged(settings.SettingsWindowHeight, originalSettingsWindowHeight)
             || HasChanged(settings.WindowLeft, originalWindowLeft)
             || HasChanged(settings.WindowTop, originalWindowTop)
             || HasChanged(settings.LyricsOnlyLeft, originalLyricsOnlyLeft)
             || HasChanged(settings.LyricsOnlyTop, originalLyricsOnlyTop)
             || HasChanged(settings.IslandLeft, originalIslandLeft)
             || HasChanged(settings.IslandTop, originalIslandTop)
+            || HasChanged(settings.SettingsWindowLeft, originalSettingsWindowLeft)
+            || HasChanged(settings.SettingsWindowTop, originalSettingsWindowTop)
             || !string.Equals(settings.OriginalColor, originalOriginalColor, StringComparison.Ordinal)
             || !string.Equals(settings.MainColor, originalMainColor, StringComparison.Ordinal)
             || !string.Equals(settings.BackgroundColor, originalBackgroundColor, StringComparison.Ordinal)

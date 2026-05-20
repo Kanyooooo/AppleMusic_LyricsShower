@@ -8,7 +8,7 @@
         MinHeight="180"
         AllowsTransparency="True"
         Background="Transparent"
-        ResizeMode="CanResizeWithGrip"
+        ResizeMode="CanResize"
         ShowInTaskbar="True"
         Topmost="True"
         WindowStartupLocation="CenterScreen"
@@ -20,6 +20,7 @@
     <Window.ContextMenu>
         <ContextMenu>
             <MenuItem x:Name="ContextSettingsMenuItem" Header="Settings" Click="SettingsMenuItem_Click" />
+            <MenuItem x:Name="ContextOpenDataDirectoryMenuItem" Header="Open data directory" Click="OpenDataDirectoryMenuItem_Click" />
             <MenuItem x:Name="ContextTranslationMenuItem" Header="Toggle translation" Click="ToggleTranslationMenuItem_Click" />
             <MenuItem x:Name="ContextLyricsOnlyMenuItem" Header="Lyrics-only mode" Click="LyricsOnlyMenuItem_Click" />
             <Separator />

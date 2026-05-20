@@ -23,6 +23,7 @@ public sealed class UiText
     public string WaitingForAppleMusicStatus => Language == UiLanguage.English ? "Play a song in Apple Music" : "请在 Apple Music 中播放一首歌";
     public string LoadingLyrics => Language == UiLanguage.English ? "Loading lyrics" : "正在加载歌词";
     public string ScanningMemory => Language == UiLanguage.English ? "Scanning Apple Music memory" : "正在扫描 Apple Music 内存";
+    public string AutoRetryLoadingLyrics(int attempt, int total) => Language == UiLanguage.English ? $"Apple Music has not exposed lyrics yet; retrying {attempt}/{total}" : $"Apple Music 还没放出歌词，正在自动重试 {attempt}/{total}";
     public string AppleMusicProcessNotFound => Language == UiLanguage.English ? "Apple Music process not found" : "未找到 Apple Music 进程";
     public string MemoryLyricsMissedFallback => Language == UiLanguage.English ? "Memory lyrics missed; trying LRCLIB fallback" : "内存歌词没有命中，正在尝试 LRCLIB 备用源";
     public string OpenLyricsPanelThenRescan => Language == UiLanguage.English ? "Open Apple Music lyrics once, then rescan" : "请先在 Apple Music 打开一次歌词面板，再重新扫描";
@@ -47,6 +48,7 @@ public sealed class UiText
     public string ScanningMemoryStep(int attempt, int total) => Language == UiLanguage.English ? $"Scanning Apple Music memory {attempt}/{total}" : $"正在扫描 Apple Music 内存 {attempt}/{total}";
     public string ShowWindow => Language == UiLanguage.English ? "Show window" : "显示窗口";
     public string Settings => Language == UiLanguage.English ? "Settings" : "设置";
+    public string OpenDataDirectory => Language == UiLanguage.English ? "Open data directory" : "打开数据目录";
     public string ToggleTranslationOn => Language == UiLanguage.English ? "Hide translation" : "隐藏翻译";
     public string ToggleTranslationOff => Language == UiLanguage.English ? "Show translation" : "显示翻译";
     public string LyricsOnlyMode => Language == UiLanguage.English ? "Lyrics-only mode" : "仅歌词模式";

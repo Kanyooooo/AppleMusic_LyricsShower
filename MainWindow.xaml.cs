@@ -29,7 +29,7 @@ public partial class MainWindow : Window
     private readonly LyricsCacheService _lyricsCache = new();
     private readonly AppSettingsService _settingsService = new();
     private readonly DispatcherTimer _timer;
-    private readonly Forms.NotifyIcon _trayIcon;
+    private readonly Forms.NotifyIcon? _trayIcon;
     private readonly Forms.ContextMenuStrip _trayMenu = new();
     private readonly DisplayModeCoordinator _displayMode;
 
@@ -39,9 +39,19 @@ public partial class MainWindow : Window
 
     private const double MinimumDisplayConfidence = 0.35;
     private const double MinimumReplaceCachedConfidence = 0.80;
+    private const double MinimumImmediateMemoryConfidence = 0.58;
     private const double VisibleAnchorsFallbackConfidence = 0.42;
     private const double LrcLibSyncedFallbackConfidence = 0.68;
     private const double LrcLibPlainFallbackConfidence = 0.36;
+    private static readonly TimeSpan FallbackLyricsBudget = TimeSpan.FromMilliseconds(2500);
+    private static readonly TimeSpan[] AutoRetryDelays =
+    [
+        TimeSpan.FromMilliseconds(700),
+        TimeSpan.FromMilliseconds(1800)
+    ];
+    private static readonly string AppDataDirectory = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "AppleMusicTranslator");
 
     private AppSettings _settings;
     private UiText _ui = UiText.Chinese;
@@ -55,6 +65,7 @@ public partial class MainWindow : Window
     private bool _tickRunning;
     private string _lastDisplayedLine = string.Empty;
     private DateTime _lastFullScan = DateTime.MinValue;
+    private string _lastFullScanTrackKey = string.Empty;
     private CancellationTokenSource? _autoRetryCancellation;
     private DateTime _lastVisibleFallbackRefresh = DateTime.MinValue;
     private string _lastVisibleFallbackSnapshot = string.Empty;
@@ -74,6 +85,7 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        AppLogger.Info("Main window initialization started.");
         InitializeComponent();
         _verticalScrollAnimator = new ScrollViewerOffsetAnimator(VerticalLyricsView);
 
@@ -97,8 +109,18 @@ public partial class MainWindow : Window
         };
         _timer.Tick += Timer_Tick;
 
-        _trayIcon = CreateTrayIcon();
-        _trayIcon.Visible = true;
+        try
+        {
+            _trayIcon = CreateTrayIcon();
+            _trayIcon.Visible = true;
+            AppLogger.Info("Tray icon initialized.");
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Warn("Tray icon initialization failed; continuing without tray icon.", ex);
+        }
+
+        AppLogger.Info("Main window initialization completed.");
     }
 
     private TimeSpan LyricOffset => TimeSpan.FromMilliseconds(_settings.LyricOffsetMs);
@@ -109,6 +131,7 @@ public partial class MainWindow : Window
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
+        AppLogger.Info("Main window loaded.");
         _displayMode.ApplyHostMode();
         _displayMode.EnforceTopmost();
         _timer.Start();
@@ -140,8 +163,9 @@ public partial class MainWindow : Window
         {
             await RefreshMediaStateAsync();
         }
-        catch
+        catch (Exception ex)
         {
+            AppLogger.Warn("Failed to refresh media state.", ex);
             if (!_latestTrack.HasSongIdentity)
             {
                 ClearLyrics(_ui.WaitingForAppleMusicTitle);
@@ -181,7 +205,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private void BeginLoadLyrics(TrackInfo track, bool forceReload = false, bool allowAutoRetry = true)
+    private void BeginLoadLyrics(
+        TrackInfo track,
+        bool forceReload = false,
+        bool allowAutoRetry = true,
+        int autoRetryIndex = 0)
     {
         _autoRetryCancellation?.Cancel();
         _loadCancellation?.Cancel();
@@ -217,7 +245,7 @@ public partial class MainWindow : Window
             SourceText.Text = _ui.AppleMusicMemorySource;
         }
 
-        _ = LoadLyricsAsync(track, _loadCancellation.Token, forceReload, allowAutoRetry, hasCachedLyrics);
+        _ = LoadLyricsAsync(track, _loadCancellation.Token, forceReload, allowAutoRetry, hasCachedLyrics, autoRetryIndex);
     }
 
     private async Task LoadLyricsAsync(
@@ -225,7 +253,8 @@ public partial class MainWindow : Window
         CancellationToken cancellationToken,
         bool forceReload,
         bool allowAutoRetry,
-        bool hasCachedLyrics)
+        bool hasCachedLyrics,
+        int autoRetryIndex)
     {
         try
         {
@@ -249,7 +278,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            if (allowAutoRetry && ScheduleAutoRetry(track, cancellationToken))
+            if (allowAutoRetry && ScheduleAutoRetry(track, cancellationToken, autoRetryIndex))
             {
                 await Dispatcher.InvokeAsync(() =>
                 {
@@ -272,6 +301,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            AppLogger.Warn("Failed to load lyrics.", ex);
             if (hasCachedLyrics)
             {
                 await Dispatcher.InvokeAsync(() =>
@@ -284,7 +314,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            if (allowAutoRetry && ScheduleAutoRetry(track, cancellationToken))
+            if (allowAutoRetry && ScheduleAutoRetry(track, cancellationToken, autoRetryIndex))
             {
                 await Dispatcher.InvokeAsync(() =>
                 {
@@ -335,11 +365,13 @@ public partial class MainWindow : Window
                 && resolution.Confidence + 0.001 >= _loadedLyricsConfidence);
     }
 
-    private bool ScheduleAutoRetry(TrackInfo track, CancellationToken loadCancellationToken)
+    private bool ScheduleAutoRetry(TrackInfo track, CancellationToken loadCancellationToken, int retryIndex)
     {
         if (loadCancellationToken.IsCancellationRequested
             || !track.HasSongIdentity
-            || !string.Equals(track.CacheKey, _loadedTrackKey, StringComparison.Ordinal))
+            || !string.Equals(track.CacheKey, _loadedTrackKey, StringComparison.Ordinal)
+            || retryIndex < 0
+            || retryIndex >= AutoRetryDelays.Length)
         {
             return false;
         }
@@ -348,15 +380,16 @@ public partial class MainWindow : Window
         _autoRetryCancellation = CancellationTokenSource.CreateLinkedTokenSource(loadCancellationToken);
         var retryToken = _autoRetryCancellation.Token;
 
-        _ = AutoRetryLoadLyricsAsync(track, retryToken);
+        AppLogger.Info($"Scheduling lyric auto retry {retryIndex + 1}/{AutoRetryDelays.Length} for {track.CacheKey}.");
+        _ = AutoRetryLoadLyricsAsync(track, retryIndex, retryToken);
         return true;
     }
 
-    private async Task AutoRetryLoadLyricsAsync(TrackInfo track, CancellationToken cancellationToken)
+    private async Task AutoRetryLoadLyricsAsync(TrackInfo track, int retryIndex, CancellationToken cancellationToken)
     {
         try
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(700), cancellationToken);
+            await Task.Delay(AutoRetryDelays[retryIndex], cancellationToken);
             await Dispatcher.InvokeAsync(() =>
             {
                 if (cancellationToken.IsCancellationRequested
@@ -366,7 +399,14 @@ public partial class MainWindow : Window
                     return;
                 }
 
-                BeginLoadLyrics(track, forceReload: true, allowAutoRetry: false);
+                var allowMoreRetries = retryIndex + 1 < AutoRetryDelays.Length;
+                BeginLoadLyrics(
+                    track,
+                    forceReload: true,
+                    allowAutoRetry: allowMoreRetries,
+                    autoRetryIndex: retryIndex + 1);
+                AppLogger.Info($"Starting lyric auto retry {retryIndex + 1}/{AutoRetryDelays.Length} for {track.CacheKey}.");
+                StatusText.Text = _ui.AutoRetryLoadingLyrics(retryIndex + 1, AutoRetryDelays.Length);
             });
         }
         catch (OperationCanceledException)
@@ -436,9 +476,10 @@ public partial class MainWindow : Window
     {
         var memoryResolution = await FindMemoryLyricsAsync(track, forceReload, cancellationToken);
         if (memoryResolution.HasLyrics
-            && memoryResolution.Layer != LyricsResolutionLayer.VisibleAnchors
-            && memoryResolution.Confidence >= MinimumReplaceCachedConfidence)
+            && memoryResolution.Confidence >= MinimumImmediateMemoryConfidence)
         {
+            AppLogger.Info(
+                $"Using memory lyrics immediately. Layer={memoryResolution.Layer}, Confidence={memoryResolution.Confidence:0.000}, Detail={memoryResolution.Detail}");
             return memoryResolution;
         }
 
@@ -451,9 +492,30 @@ public partial class MainWindow : Window
             });
         }
 
-        var fallback = await _fallbackLyrics.SearchAsync(track, cancellationToken);
+        var fallback = await SearchFallbackLyricsWithBudgetAsync(track, cancellationToken);
         var fallbackResolution = BuildLrcLibResolution(fallback, track);
         return BetterResolution(memoryResolution, fallbackResolution);
+    }
+
+    private async Task<LyricsBundle> SearchFallbackLyricsWithBudgetAsync(TrackInfo track, CancellationToken cancellationToken)
+    {
+        using var fallbackTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        fallbackTimeout.CancelAfter(FallbackLyricsBudget);
+
+        try
+        {
+            return await _fallbackLyrics.SearchAsync(track, fallbackTimeout.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            AppLogger.Warn($"LRCLIB fallback timed out after {FallbackLyricsBudget.TotalMilliseconds:0} ms for {track.CacheKey}.");
+            return LyricsBundle.Empty("LRCLIB fallback timed out");
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Warn("LRCLIB fallback failed.", ex);
+            return LyricsBundle.Empty("LRCLIB fallback failed");
+        }
     }
 
     private async Task<LyricsResolution> FindMemoryLyricsAsync(TrackInfo track, bool forceReload, CancellationToken cancellationToken)
@@ -488,7 +550,7 @@ public partial class MainWindow : Window
                 var cachedMatch = _lyricsMatcher.FindBestMatch(cachedCandidates, track, visibleAnchors);
                 if (cachedMatch is { AnchorHits: > 0 })
                 {
-                    _lastFullScan = DateTime.UtcNow;
+                    RememberFullScan(track);
                     return FromMatch(cachedMatch, LyricsResolutionLayer.NearAddressScan, "cached memory address");
                 }
             }
@@ -506,12 +568,9 @@ public partial class MainWindow : Window
             return FromMatch(nearAddressMatch, LyricsResolutionLayer.NearAddressScan, "visible lyric address scan");
         }
 
-        if (visibleAnchors.Count == 0)
-        {
-            return LyricsResolution.Empty(LyricsResolutionLayer.VisibleAnchors, _ui.RejectedStaleMemoryLyrics);
-        }
-
-        var shouldFullScan = forceReload || DateTime.UtcNow - _lastFullScan > TimeSpan.FromSeconds(12);
+        var shouldFullScan = forceReload
+            || !string.Equals(_lastFullScanTrackKey, track.CacheKey, StringComparison.Ordinal)
+            || DateTime.UtcNow - _lastFullScan > TimeSpan.FromSeconds(12);
         if (!shouldFullScan)
         {
             return BuildVisibleLyricsResolution(track, visibleAnchors);
@@ -528,7 +587,7 @@ public partial class MainWindow : Window
 
         if (best is not null)
         {
-            _lastFullScan = DateTime.UtcNow;
+            RememberFullScan(track);
         }
 
         if (visibleAnchors.Count > 0 && best is { AnchorHits: 0 })
@@ -585,6 +644,12 @@ public partial class MainWindow : Window
 
     private static LyricsResolution FromMatch(LyricMatch match, LyricsResolutionLayer layer, string detail) =>
         new(match.Lyrics, layer, match.Confidence, detail);
+
+    private void RememberFullScan(TrackInfo track)
+    {
+        _lastFullScan = DateTime.UtcNow;
+        _lastFullScanTrackKey = track.CacheKey;
+    }
 
     private LyricsResolution BuildLrcLibResolution(LyricsBundle lyrics, TrackInfo track)
     {
@@ -1195,6 +1260,7 @@ public partial class MainWindow : Window
         CloseButton.ToolTip = _ui.HideWindow;
 
         ContextSettingsMenuItem.Header = _ui.Settings;
+        ContextOpenDataDirectoryMenuItem.Header = _ui.OpenDataDirectory;
         ContextTranslationMenuItem.Header = _settings.ShowTranslation ? _ui.ToggleTranslationOn : _ui.ToggleTranslationOff;
         ContextLyricsOnlyMenuItem.Header = _ui.LyricsOnlyMode;
         ContextExitMenuItem.Header = _ui.Exit;
@@ -1485,7 +1551,6 @@ public partial class MainWindow : Window
 
         _settingsWindow = new SettingsWindow(_settings, this)
         {
-            WindowStartupLocation = WindowStartupLocation.CenterScreen,
             Topmost = true
         };
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
@@ -1548,9 +1613,16 @@ public partial class MainWindow : Window
 
     private void MinimizeButton_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
 
-    private void CloseButton_Click(object sender, RoutedEventArgs e) => Hide();
+    private void CloseButton_Click(object sender, RoutedEventArgs e)
+    {
+        RememberWindowPlacement();
+        SaveSettingsOnly();
+        Hide();
+    }
 
     private void SettingsMenuItem_Click(object sender, RoutedEventArgs e) => ShowSettingsWindow();
+
+    private void OpenDataDirectoryMenuItem_Click(object sender, RoutedEventArgs e) => OpenDataDirectory();
 
     private void CloseMenuItem_Click(object sender, RoutedEventArgs e) => ExitApplication();
 
@@ -1620,7 +1692,11 @@ public partial class MainWindow : Window
         UpdateTrayMenuText();
     }
 
-    internal void SaveSettingsOnly() => _settingsService.Save(_settings);
+    internal void SaveSettingsOnly()
+    {
+        _displayMode.NormalizeSettings();
+        _settingsService.Save(_settings);
+    }
 
     internal void OpenSettingsFromChild() => ShowSettingsWindow();
 
@@ -1826,6 +1902,7 @@ public partial class MainWindow : Window
     {
         _trayMenu.Items.Add("show", null, (_, _) => Dispatcher.Invoke(ShowWindowAndBringFront));
         _trayMenu.Items.Add("settings", null, (_, _) => Dispatcher.Invoke(ShowSettingsWindow));
+        _trayMenu.Items.Add("data-directory", null, (_, _) => Dispatcher.Invoke(OpenDataDirectory));
         _trayMenu.Items.Add("translation", null, (_, _) => Dispatcher.Invoke(ToggleTranslation));
         _trayMenu.Items.Add("lyrics-only", null, (_, _) => Dispatcher.Invoke(() =>
         {
@@ -1876,9 +1953,9 @@ public partial class MainWindow : Window
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Fallback to the system icon if the embedded icon cannot be loaded.
+            AppLogger.Warn("Failed to load embedded tray icon; using the system icon.", ex);
         }
 
         return Drawing.SystemIcons.Application;
@@ -1886,18 +1963,19 @@ public partial class MainWindow : Window
 
     private void UpdateTrayMenuText()
     {
-        if (_trayMenu.Items.Count < 8)
+        if (_trayMenu.Items.Count < 9)
         {
             return;
         }
 
         _trayMenu.Items[0].Text = _ui.ShowWindow;
         _trayMenu.Items[1].Text = _ui.Settings;
-        _trayMenu.Items[2].Text = _settings.ShowTranslation ? _ui.ToggleTranslationOn : _ui.ToggleTranslationOff;
-        _trayMenu.Items[3].Text = CurrentShellMode == WindowShellMode.LyricsOnly ? _ui.ExitLyricsOnly : _ui.LyricsOnlyMode;
-        _trayMenu.Items[4].Text = CurrentShellMode == WindowShellMode.Island ? _ui.NormalWindow : _ui.DynamicIsland;
-        _trayMenu.Items[5].Text = _ui.RescanLyrics;
-        _trayMenu.Items[7].Text = _ui.Exit;
+        _trayMenu.Items[2].Text = _ui.OpenDataDirectory;
+        _trayMenu.Items[3].Text = _settings.ShowTranslation ? _ui.ToggleTranslationOn : _ui.ToggleTranslationOff;
+        _trayMenu.Items[4].Text = CurrentShellMode == WindowShellMode.LyricsOnly ? _ui.ExitLyricsOnly : _ui.LyricsOnlyMode;
+        _trayMenu.Items[5].Text = CurrentShellMode == WindowShellMode.Island ? _ui.NormalWindow : _ui.DynamicIsland;
+        _trayMenu.Items[6].Text = _ui.RescanLyrics;
+        _trayMenu.Items[8].Text = _ui.Exit;
 
         if (_trayIcon is not null)
         {
@@ -1905,8 +1983,15 @@ public partial class MainWindow : Window
         }
     }
 
+    private static void OpenDataDirectory()
+    {
+        Directory.CreateDirectory(AppDataDirectory);
+        System.Diagnostics.Process.Start("explorer.exe", AppDataDirectory);
+    }
+
     private void ExitApplication()
     {
+        AppLogger.Info("Exit requested from UI.");
         _allowClose = true;
         _settingsWindow?.Close();
         _displayMode.CloseChildWindows();
@@ -1918,22 +2003,29 @@ public partial class MainWindow : Window
     {
         if (_allowClose)
         {
+            RememberWindowPlacement();
+            SaveSettingsOnly();
             return;
         }
 
         e.Cancel = true;
         if (CurrentShellMode == WindowShellMode.Normal)
         {
+            AppLogger.Info("Close requested; hiding main window to tray.");
+            RememberWindowPlacement();
+            SaveSettingsOnly();
             Hide();
         }
         else
         {
+            AppLogger.Info("Close requested outside normal mode; bringing window to front.");
             ShowWindowAndBringFront();
         }
     }
 
     protected override void OnClosed(EventArgs e)
     {
+        AppLogger.Info("Main window closing.");
         _timer.Stop();
         RememberWindowPlacement();
         _displayMode.CloseChildWindows();
@@ -1943,9 +2035,14 @@ public partial class MainWindow : Window
         _translationCancellation?.Cancel();
         _translationService.FlushCache();
         _settingsService.Save(_settings);
-        _trayIcon.Visible = false;
-        _trayIcon.Dispose();
+        if (_trayIcon is not null)
+        {
+            _trayIcon.Visible = false;
+            _trayIcon.Dispose();
+        }
+
         base.OnClosed(e);
+        AppLogger.Info("Main window closed.");
     }
 
     private sealed class ScrollViewerOffsetAnimator : Animatable

@@ -69,7 +69,7 @@ Windows Apple Music 歌词翻译悬浮窗。它会读取 Apple Music 当前播�
 
 ## 运行
 
-普通用户请下载 Release 里的 `AppleMusicTranslator.exe` 单文件版，双击即可运行；不需要安装 .NET。
+普通用户请下载 Release 里的 `AppleMusicTranslator-<版本>-win-x64-portable.zip`，解压后双击 `AppleMusicTranslator.exe` 即可运行；这是便携压缩包，不是安装器，也不需要安装 .NET。
 
 如果 Windows SmartScreen 提示“Windows 已保护你的电脑”，这是因为当前构建未做代码签名。确认来源可信后，点“更多信息” -> “仍要运行”即可。
 
@@ -94,7 +94,9 @@ dotnet build .\Diagnostics\AppleMusicTranslator.Diagnostics.csproj -c Release
 .\scripts\Publish-Portable.ps1
 ```
 
-脚本会生成自包含单文件 exe，并同时打包 zip。没有传 `-Tag` 时会输出到临时 dev 目录：
+脚本会先关闭 .NET build server，并安全清理本次目标的 `bin\Release\<framework>\<runtime>\`、`obj\Release\<framework>\<runtime>\` 和对应 `Release\...` 输出目录。随后它会生成自包含单文件 exe、写入 `README.txt`、打包 portable zip，并检查 exe、zip、zip 内容和 SHA256。
+
+没有传 `-Tag` 时会输出到临时 dev 目录：
 
 ```text
 Release\dev-yyyyMMdd-HHmmss\portable-win-x64\AppleMusicTranslator.exe
@@ -107,7 +109,7 @@ Release\dev-yyyyMMdd-HHmmss\AppleMusicTranslator-dev-yyyyMMdd-HHmmss-win-x64-por
 .\scripts\Publish-Portable.ps1 -Tag v0.2.0-beta.1
 ```
 
-GitHub Release 优先上传 `AppleMusicTranslator-<tag>-win-x64-portable.zip` 和 `SHA256SUMS.txt`。zip 里面带有 `README.txt`，用户解压后双击 `AppleMusicTranslator.exe` 即可运行。
+GitHub Release 优先上传 `AppleMusicTranslator-<tag>-win-x64-portable.zip` 和 `SHA256SUMS.txt`。zip 里面只应该带有 `AppleMusicTranslator.exe` 和 `README.txt`，不应该出现散落的 `.dll`、`.pdb`、`.json`、`.deps`、`.runtimeconfig` 等文件。用户解压后双击 `AppleMusicTranslator.exe` 即可运行；这个 zip 是 portable 包，不是安装器。
 
 如果需要手动执行发布命令：
 

@@ -10,6 +10,8 @@
 - 每个正式发布必须使用 SemVer tag，例如 `v0.2.0-beta.1`。
 - 发布脚本在传入 `-Tag` 时会拒绝 dirty working tree，也会拒绝没有 tag 或 tag 不指向 HEAD 的构建。
 - 不传 `-Tag` 时会创建 `Release/dev-yyyyMMdd-HHmmss/`，用于临时补包测试。
+- 发布脚本会在发布前关闭 .NET build server，并安全清理本次目标的 `bin\Release\<framework>\<runtime>\`、`obj\Release\<framework>\<runtime>\` 和对应 `Release\...` 输出目录。
+- 发布脚本会在发布后检查 exe、zip、zip 内文件和 SHA256；portable zip 只应该包含 `AppleMusicTranslator.exe` 和 `README.txt`，不能混入散落的 `.dll`、`.pdb`、`.json`、`.deps`、`.runtimeconfig` 等文件。
 
 ## 第一次恢复 Git 工作区
 
@@ -53,5 +55,7 @@ GitHub Release 优先上传：
 AppleMusicTranslator-v0.2.0-beta.1-win-x64-portable.zip
 SHA256SUMS.txt
 ```
+
+`AppleMusicTranslator-<tag>-win-x64-portable.zip` 是便携压缩包，不是安装器。用户需要解压后运行 `AppleMusicTranslator.exe`。
 
 `portable-win-x64\AppleMusicTranslator.exe` 是同一次构建留下的解包检查件，不需要单独上传。
